@@ -73,6 +73,30 @@ final class DatabaseService {
     }
   }
 
+  /// The current live issue with its pages (ordered) and each page's widgets
+  /// (ordered by position). Returns nil when no issue is live.
+  func fetchCurrentIssue() async throws -> (issue: Issue, pages: [(page: Page, widgets: [PageMedia])])? {
+    let issues: [Issue] = try await supabase.from("issues")
+      .select().eq("is_live", value: true)
+      .order("created_at", ascending: false).limit(1).execute().value
+    guard let issue = issues.first else { return nil }
+
+    let pages: [Page] = try await supabase.from("pages")
+      .select().eq("issue_id", value: issue.id.uuidString)
+      .order("created_at", ascending: true).execute().value
+
+    // ponytail: N+1 — one media query per page. Fine for a handful of pages;
+    // switch to a nested select or an `in` filter if issues get large.
+    var result: [(page: Page, widgets: [PageMedia])] = []
+    for page in pages {
+      let widgets: [PageMedia] = try await supabase.from("page_media")
+        .select().eq("page_id", value: page.id.uuidString)
+        .order("position", ascending: true).execute().value
+      result.append((page, widgets))
+    }
+    return (issue, result)
+  }
+
   // MARK: - Auth
 
   func sendOTP(email: String) async throws {

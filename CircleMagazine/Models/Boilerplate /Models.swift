@@ -74,11 +74,12 @@ struct Issue: Codable {
     }
 }
 
-struct PageMedia: Codable {
+struct PageMedia: Codable, Identifiable {
     let id: UUID
     let pageId: UUID?
-    let mediaUrl: String
+    let mediaUrl: String?     // nil for text widgets
     let mediaType: String?
+    let textContent: String?  // nil for media widgets
     let position: Int?
     let createdAt: Date?
 
@@ -87,8 +88,47 @@ struct PageMedia: Codable {
         case pageId = "page_id"
         case mediaUrl = "media_url"
         case mediaType = "media_type"
+        case textContent = "text_content"
         case position
         case createdAt = "created_at"
+    }
+}
+
+/// The widget kinds a page can hold. Backed by `page_media.media_type`.
+enum WidgetType: String {
+    case text, image, video, audio
+}
+
+extension PageMedia {
+    var widgetType: WidgetType? { mediaType.flatMap(WidgetType.init(rawValue:)) }
+
+    /// Render-ready view model for a widget, derived from its DB row.
+    /// One case per `WidgetType`; the views render straight from this. Returns
+    /// nil when the row is malformed (e.g. an image with no URL).
+    var widgetContent: WidgetContent? { WidgetContent(self) }
+}
+
+enum WidgetContent {
+    case text(String)
+    case image(URL)
+    case video(URL)
+    case audio(URL)
+
+    init?(_ media: PageMedia) {
+        switch media.widgetType {
+        case .text:
+            guard let t = media.textContent else { return nil }
+            self = .text(t)
+        case .image, .video, .audio:
+            guard let raw = media.mediaUrl, let url = URL(string: raw) else { return nil }
+            switch media.widgetType {
+            case .image: self = .image(url)
+            case .video: self = .video(url)
+            default:     self = .audio(url)
+            }
+        case nil:
+            return nil
+        }
     }
 }
 

@@ -16,7 +16,7 @@ struct CircleMagazineApp: App {
             switch db.authState {
             case .loading:   ProgressView()
             case .signedOut: WelcomeView(db: db)
-            case .signedIn:  ContentView(db: db)
+            case .signedIn:  MagazineView(db: db)
             }
         }
     }
