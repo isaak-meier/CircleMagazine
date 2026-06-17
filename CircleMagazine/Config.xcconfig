@@ -1,0 +1,4 @@
+// Config.xcconfig — committed to source control
+// Requires Secrets.xcconfig alongside it (gitignored) with actual values.
+
+#include "Secrets.xcconfig"

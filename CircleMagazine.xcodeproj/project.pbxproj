@@ -1,0 +1,617 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		EA51C1562FE18BBF00B538A1 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = EA51C1552FE18BBF00B538A1 /* Supabase */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		EA51C12C2FE0E48300B538A1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EA51C1162FE0E48200B538A1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EA51C11D2FE0E48200B538A1;
+			remoteInfo = CircleMagazine;
+		};
+		EA51C1362FE0E48300B538A1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EA51C1162FE0E48200B538A1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EA51C11D2FE0E48200B538A1;
+			remoteInfo = CircleMagazine;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		EA51C11E2FE0E48200B538A1 /* CircleMagazine.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CircleMagazine.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EA51C12B2FE0E48300B538A1 /* CircleMagazineTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CircleMagazineTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		EA51C1352FE0E48300B538A1 /* CircleMagazineUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CircleMagazineUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		EA51C1202FE0E48200B538A1 /* CircleMagazine */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CircleMagazine;
+			sourceTree = "<group>";
+		};
+		EA51C12E2FE0E48300B538A1 /* CircleMagazineTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CircleMagazineTests;
+			sourceTree = "<group>";
+		};
+		EA51C1382FE0E48300B538A1 /* CircleMagazineUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CircleMagazineUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		EA51C11B2FE0E48200B538A1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EA51C1562FE18BBF00B538A1 /* Supabase in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EA51C1282FE0E48300B538A1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EA51C1322FE0E48300B538A1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		EA51C1152FE0E48200B538A1 = {
+			isa = PBXGroup;
+			children = (
+				EA51C1202FE0E48200B538A1 /* CircleMagazine */,
+				EA51C12E2FE0E48300B538A1 /* CircleMagazineTests */,
+				EA51C1382FE0E48300B538A1 /* CircleMagazineUITests */,
+				EA51C1542FE18BBF00B538A1 /* Frameworks */,
+				EA51C11F2FE0E48200B538A1 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		EA51C11F2FE0E48200B538A1 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				EA51C11E2FE0E48200B538A1 /* CircleMagazine.app */,
+				EA51C12B2FE0E48300B538A1 /* CircleMagazineTests.xctest */,
+				EA51C1352FE0E48300B538A1 /* CircleMagazineUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		EA51C1542FE18BBF00B538A1 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		EA51C11D2FE0E48200B538A1 /* CircleMagazine */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EA51C13F2FE0E48300B538A1 /* Build configuration list for PBXNativeTarget "CircleMagazine" */;
+			buildPhases = (
+				EA51C11A2FE0E48200B538A1 /* Sources */,
+				EA51C11B2FE0E48200B538A1 /* Frameworks */,
+				EA51C11C2FE0E48200B538A1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				EA51C1202FE0E48200B538A1 /* CircleMagazine */,
+			);
+			name = CircleMagazine;
+			packageProductDependencies = (
+				EA51C1552FE18BBF00B538A1 /* Supabase */,
+			);
+			productName = CircleMagazine;
+			productReference = EA51C11E2FE0E48200B538A1 /* CircleMagazine.app */;
+			productType = "com.apple.product-type.application";
+		};
+		EA51C12A2FE0E48300B538A1 /* CircleMagazineTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EA51C1422FE0E48300B538A1 /* Build configuration list for PBXNativeTarget "CircleMagazineTests" */;
+			buildPhases = (
+				EA51C1272FE0E48300B538A1 /* Sources */,
+				EA51C1282FE0E48300B538A1 /* Frameworks */,
+				EA51C1292FE0E48300B538A1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EA51C12D2FE0E48300B538A1 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				EA51C12E2FE0E48300B538A1 /* CircleMagazineTests */,
+			);
+			name = CircleMagazineTests;
+			packageProductDependencies = (
+			);
+			productName = CircleMagazineTests;
+			productReference = EA51C12B2FE0E48300B538A1 /* CircleMagazineTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		EA51C1342FE0E48300B538A1 /* CircleMagazineUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EA51C1452FE0E48300B538A1 /* Build configuration list for PBXNativeTarget "CircleMagazineUITests" */;
+			buildPhases = (
+				EA51C1312FE0E48300B538A1 /* Sources */,
+				EA51C1322FE0E48300B538A1 /* Frameworks */,
+				EA51C1332FE0E48300B538A1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EA51C1372FE0E48300B538A1 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				EA51C1382FE0E48300B538A1 /* CircleMagazineUITests */,
+			);
+			name = CircleMagazineUITests;
+			packageProductDependencies = (
+			);
+			productName = CircleMagazineUITests;
+			productReference = EA51C1352FE0E48300B538A1 /* CircleMagazineUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		EA51C1162FE0E48200B538A1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2630;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					EA51C11D2FE0E48200B538A1 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					EA51C12A2FE0E48300B538A1 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = EA51C11D2FE0E48200B538A1;
+					};
+					EA51C1342FE0E48300B538A1 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = EA51C11D2FE0E48200B538A1;
+					};
+				};
+			};
+			buildConfigurationList = EA51C1192FE0E48200B538A1 /* Build configuration list for PBXProject "CircleMagazine" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = EA51C1152FE0E48200B538A1;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				EA51C1482FE0E5AC00B538A1 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = EA51C11F2FE0E48200B538A1 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				EA51C11D2FE0E48200B538A1 /* CircleMagazine */,
+				EA51C12A2FE0E48300B538A1 /* CircleMagazineTests */,
+				EA51C1342FE0E48300B538A1 /* CircleMagazineUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		EA51C11C2FE0E48200B538A1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EA51C1292FE0E48300B538A1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EA51C1332FE0E48300B538A1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		EA51C11A2FE0E48200B538A1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EA51C1272FE0E48300B538A1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EA51C1312FE0E48300B538A1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EA51C12D2FE0E48300B538A1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EA51C11D2FE0E48200B538A1 /* CircleMagazine */;
+			targetProxy = EA51C12C2FE0E48300B538A1 /* PBXContainerItemProxy */;
+		};
+		EA51C1372FE0E48300B538A1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EA51C11D2FE0E48200B538A1 /* CircleMagazine */;
+			targetProxy = EA51C1362FE0E48300B538A1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		EA51C13D2FE0E48300B538A1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = EA51C1202FE0E48200B538A1 /* CircleMagazine */;
+			baseConfigurationReferenceRelativePath = Config.xcconfig;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = L2N25GKBQX;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		EA51C13E2FE0E48300B538A1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = EA51C1202FE0E48200B538A1 /* CircleMagazine */;
+			baseConfigurationReferenceRelativePath = Config.xcconfig;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = L2N25GKBQX;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		EA51C1402FE0E48300B538A1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = EA51C1202FE0E48200B538A1 /* CircleMagazine */;
+			baseConfigurationReferenceRelativePath = Config.xcconfig;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = L2N25GKBQX;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.isaak.-CircleMagazine.CircleMagazine";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		EA51C1412FE0E48300B538A1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = EA51C1202FE0E48200B538A1 /* CircleMagazine */;
+			baseConfigurationReferenceRelativePath = Config.xcconfig;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = L2N25GKBQX;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.isaak.-CircleMagazine.CircleMagazine";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		EA51C1432FE0E48300B538A1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = L2N25GKBQX;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.isaak.-CircleMagazine.CircleMagazineTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CircleMagazine.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CircleMagazine";
+			};
+			name = Debug;
+		};
+		EA51C1442FE0E48300B538A1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = L2N25GKBQX;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.isaak.-CircleMagazine.CircleMagazineTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CircleMagazine.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CircleMagazine";
+			};
+			name = Release;
+		};
+		EA51C1462FE0E48300B538A1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = L2N25GKBQX;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.isaak.-CircleMagazine.CircleMagazineUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = CircleMagazine;
+			};
+			name = Debug;
+		};
+		EA51C1472FE0E48300B538A1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = L2N25GKBQX;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.isaak.-CircleMagazine.CircleMagazineUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = CircleMagazine;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		EA51C1192FE0E48200B538A1 /* Build configuration list for PBXProject "CircleMagazine" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EA51C13D2FE0E48300B538A1 /* Debug */,
+				EA51C13E2FE0E48300B538A1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EA51C13F2FE0E48300B538A1 /* Build configuration list for PBXNativeTarget "CircleMagazine" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EA51C1402FE0E48300B538A1 /* Debug */,
+				EA51C1412FE0E48300B538A1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EA51C1422FE0E48300B538A1 /* Build configuration list for PBXNativeTarget "CircleMagazineTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EA51C1432FE0E48300B538A1 /* Debug */,
+				EA51C1442FE0E48300B538A1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EA51C1452FE0E48300B538A1 /* Build configuration list for PBXNativeTarget "CircleMagazineUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EA51C1462FE0E48300B538A1 /* Debug */,
+				EA51C1472FE0E48300B538A1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		EA51C1482FE0E5AC00B538A1 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase-community/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		EA51C1552FE18BBF00B538A1 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EA51C1482FE0E5AC00B538A1 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = EA51C1162FE0E48200B538A1 /* Project object */;
+}

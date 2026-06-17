@@ -1,0 +1,15 @@
+# Secrets — never commit
+CircleMagazine/Secrets.xcconfig
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
