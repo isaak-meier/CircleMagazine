@@ -6,13 +6,48 @@
 //
 
 import Foundation
+import Observation
 import Supabase
 
-class DatabaseService {
+@MainActor
+@Observable
+final class DatabaseService {
   let supabase = SupabaseClient(
     supabaseURL: Config.supabaseURL,
     supabaseKey: Config.supabaseAnonKey
   )
+
+  // MARK: - Session
+
+  enum AuthState { case loading, signedOut, signedIn }
+  var authState: AuthState = .loading
+
+  init() {
+    Task {
+      for await change in supabase.auth.authStateChanges {
+        switch change.event {
+        case .initialSession: await evaluate(change.session)  // launch / restore
+        case .signedOut:      authState = .signedOut
+        default: break  // .signedIn is driven explicitly by AuthView
+        }
+      }
+    }
+  }
+
+  private func evaluate(_ session: Session?) async {
+    guard session != nil else { authState = .signedOut; return }
+    // ponytail: session-but-no-profile (app killed mid-signup) falls back to signedOut → re-OTP. Rare; add a .needsProfile state if it bites.
+    authState = ((try? await hasProfile()) ?? false) ? .signedIn : .signedOut
+  }
+
+  func hasProfile() async throws -> Bool {
+    let uid = try await supabase.auth.session.user.id
+    let rows: [User] = try await supabase.from("users")
+      .select().eq("id", value: uid.uuidString).limit(1).execute().value
+    return !rows.isEmpty
+  }
+
+  func signOut() async throws { try await supabase.auth.signOut() }
 
   // MARK: - Reads
 
@@ -36,6 +71,21 @@ class DatabaseService {
     } catch {
       print("Issues fetch from supabase failed with \(error)")
     }
+  }
+
+  // MARK: - Auth
+
+  func sendOTP(email: String) async throws {
+    try await supabase.auth.signInWithOTP(email: email)  // shouldCreateUser defaults true
+  }
+
+  func verifyOTP(email: String, code: String) async throws {
+    try await supabase.auth.verifyOTP(email: email, token: code, type: .email)
+  }
+
+  func createProfile(username: String) async throws {
+    let userId = try await supabase.auth.session.user.id
+    try await supabase.from("users").insert(UserInsert(id: userId, username: username)).execute()
   }
 
   // MARK: - Writes

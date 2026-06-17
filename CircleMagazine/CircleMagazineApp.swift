@@ -9,9 +9,15 @@ import SwiftUI
 
 @main
 struct CircleMagazineApp: App {
+    @State private var db = DatabaseService()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            switch db.authState {
+            case .loading:   ProgressView()
+            case .signedOut: AuthView(db: db)
+            case .signedIn:  ContentView(db: db)
+            }
         }
     }
 }

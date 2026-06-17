@@ -12,7 +12,7 @@ enum InsertState { case idle, ready, loading, success, failure }
 struct ContentView: View {
     @State private var insertState: InsertState = .idle
 
-    private let db = DatabaseService()
+    let db: DatabaseService
 
     var body: some View {
         GeometryReader { geo in
@@ -86,6 +86,9 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
 
+                Button("Sign out") { Task { try? await db.signOut() } }
+                    .buttonStyle(.bordered)
+
                 Spacer()
             }
             .padding()
@@ -95,5 +98,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(db: DatabaseService())
 }
