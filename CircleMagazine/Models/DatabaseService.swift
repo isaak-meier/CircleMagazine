@@ -112,23 +112,6 @@ final class DatabaseService {
     try await supabase.from("users").insert(UserInsert(id: userId, username: username)).execute()
   }
 
-  // MARK: - Writes
-
-  @discardableResult
-  func insertTestIssue() async -> Bool {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withFullDate]
-    let today = formatter.string(from: Date())
-
-    let testIssue = IssueInsert(publishDate: today, isLive: false)
-    do {
-      try await supabase.from("issues").insert(testIssue).execute()
-      return true
-    } catch {
-      print("Test issue insert failed with \(error)")
-      return false
-    }
-  }
 }
 
 private enum Config {
