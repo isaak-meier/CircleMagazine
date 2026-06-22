@@ -15,27 +15,47 @@ struct WidgetView: View {
 
     var body: some View {
         if let content = media.widgetContent {
-            WidgetBody(content: content, fullscreen: false)
+            tile(content: content)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                .matchedTransitionSource(id: media.id, in: namespace)
                 .contentShape(Rectangle())
                 .onTapGesture { zoomed = true }
                 .fullScreenCover(isPresented: $zoomed) {
-                    ZStack(alignment: .topTrailing) {
-                        Color.black.ignoresSafeArea()
-                        WidgetBody(content: content, fullscreen: true)
-                        Button { zoomed = false } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.largeTitle)
-                                .foregroundStyle(.white, .black.opacity(0.4))
-                                .padding()
-                        }
-                    }
-                    .navigationTransition(.zoom(sourceID: media.id, in: namespace))
+                    cover(content: content)
                 }
         } else {
             // ponytail: malformed widget row (missing url/text) — show a neutral tile.
             RoundedRectangle(cornerRadius: 12).fill(.gray.opacity(0.2))
+        }
+    }
+
+    // ponytail: zoom transition is iOS 18+; gate it so the app still builds/runs
+    // on the 17.6 deployment target with a plain cross-dissolve fallback.
+    @ViewBuilder
+    private func tile(content: WidgetContent) -> some View {
+        let body = WidgetBody(content: content, fullscreen: false)
+        if #available(iOS 18.0, *) {
+            body.matchedTransitionSource(id: media.id, in: namespace)
+        } else {
+            body
+        }
+    }
+
+    @ViewBuilder
+    private func cover(content: WidgetContent) -> some View {
+        let body = ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            WidgetBody(content: content, fullscreen: true)
+            Button { zoomed = false } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.largeTitle)
+                    .foregroundStyle(.white, .black.opacity(0.4))
+                    .padding()
+            }
+        }
+        if #available(iOS 18.0, *) {
+            body.navigationTransition(.zoom(sourceID: media.id, in: namespace))
+        } else {
+            body
         }
     }
 }

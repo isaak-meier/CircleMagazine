@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct CoverPage: View {
     let imageURL: URL?
@@ -25,13 +26,23 @@ struct CoverPage: View {
             }
 
             Text("CIRCLE")
-                .font(.system(size: 60, weight: .black, design: .rounded))
+            .font(.system(size: 60, weight: .black, design: .serif))
                 .kerning(2)
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.6), radius: 10)
-                .padding(.top, 20)
+                .padding(.top, topSafeInset + 30)
         }
         .frame(width: width, height: height)
         .clipped()
+    }
+
+    // Parent ignoresSafeArea, so a child GeometryReader reports 0 insets —
+    // read the key window's top inset directly to clear the notch.
+    private var topSafeInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets.top ?? 0
     }
 }

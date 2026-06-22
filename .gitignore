@@ -13,3 +13,9 @@ DerivedData/
 
 # Swift Package Manager
 .build/
+
+# Claude Code / tooling
+.agents/
+.claude/
+.mcp.json
+skills-lock.json

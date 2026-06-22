@@ -9,6 +9,11 @@ import Foundation
 import Observation
 import Supabase
 
+enum IssueError: LocalizedError {
+  case emptyData
+  var errorDescription: String? { "Issues, pages, or pageMedia was empty" }
+}
+
 @MainActor
 @Observable
 final class DatabaseService {
@@ -16,38 +21,6 @@ final class DatabaseService {
     supabaseURL: Config.supabaseURL,
     supabaseKey: Config.supabaseAnonKey
   )
-
-  // MARK: - Session
-
-  enum AuthState { case loading, signedOut, signedIn }
-  var authState: AuthState = .loading
-
-  init() {
-    Task {
-      for await change in supabase.auth.authStateChanges {
-        switch change.event {
-        case .initialSession: await evaluate(change.session)  // launch / restore
-        case .signedOut:      authState = .signedOut
-        default: break  // .signedIn is driven explicitly by AuthView
-        }
-      }
-    }
-  }
-
-  private func evaluate(_ session: Session?) async {
-    guard session != nil else { authState = .signedOut; return }
-    // ponytail: session-but-no-profile (app killed mid-signup) falls back to signedOut → re-OTP. Rare; add a .needsProfile state if it bites.
-    authState = ((try? await hasProfile()) ?? false) ? .signedIn : .signedOut
-  }
-
-  func hasProfile() async throws -> Bool {
-    let uid = try await supabase.auth.session.user.id
-    let rows: [User] = try await supabase.from("users")
-      .select().eq("id", value: uid.uuidString).limit(1).execute().value
-    return !rows.isEmpty
-  }
-
-  func signOut() async throws { try await supabase.auth.signOut() }
 
   // MARK: - Reads
 
@@ -75,41 +48,37 @@ final class DatabaseService {
 
   /// The current live issue with its pages (ordered) and each page's widgets
   /// (ordered by position). Returns nil when no issue is live.
-  func fetchCurrentIssue() async throws -> (issue: Issue, pages: [(page: Page, widgets: [PageMedia])])? {
+  /// could be optimzed for multiple async server calls TODO
+  func fetchCurrentIssue() async throws -> Magazine {
+
     let issues: [Issue] = try await supabase.from("issues")
       .select().eq("is_live", value: true)
       .order("created_at", ascending: false).limit(1).execute().value
-    guard let issue = issues.first else { return nil }
+    guard let issue = issues.first else { throw IssueError.emptyData }
 
     let pages: [Page] = try await supabase.from("pages")
       .select().eq("issue_id", value: issue.id.uuidString)
       .order("created_at", ascending: true).execute().value
+    guard !pages.isEmpty else { throw IssueError.emptyData }
 
-    // ponytail: N+1 — one media query per page. Fine for a handful of pages;
-    // switch to a nested select or an `in` filter if issues get large.
-    var result: [(page: Page, widgets: [PageMedia])] = []
-    for page in pages {
-      let widgets: [PageMedia] = try await supabase.from("page_media")
-        .select().eq("page_id", value: page.id.uuidString)
-        .order("position", ascending: true).execute().value
-      result.append((page, widgets))
-    }
-    return (issue, result)
+    // One round trip for all media, then group in memory
+    let pageIds = pages.map(\.id.uuidString)
+    let media: [PageMedia] = try await supabase.from("page_media")
+      .select().in("page_id", values: pageIds)
+      .order("position", ascending: true).execute().value
+    guard !media.isEmpty else { throw IssueError.emptyData }
+    let byPage = Dictionary(grouping: media, by: \.pageId)
+
+    let result = pages.map { MagazinePage(page: $0, widgets: byPage[$0.id] ?? []) }
+    return Magazine(issue: issue, pages: result)
   }
 
-  // MARK: - Auth
-
-  func sendOTP(email: String) async throws {
-    try await supabase.auth.signInWithOTP(email: email)  // shouldCreateUser defaults true
-  }
-
-  func verifyOTP(email: String, code: String) async throws {
-    try await supabase.auth.verifyOTP(email: email, token: code, type: .email)
-  }
-
-  func createProfile(username: String) async throws {
-    let userId = try await supabase.auth.session.user.id
-    try await supabase.from("users").insert(UserInsert(id: userId, username: username)).execute()
+  /// Cheap staleness probe — just the live issue's id, no pages/media.
+  func currentIssueId() async throws -> UUID? {
+    let issues: [Issue] = try await supabase.from("issues")
+      .select().eq("is_live", value: true)
+      .order("created_at", ascending: false).limit(1).execute().value
+    return issues.first?.id
   }
 
 }

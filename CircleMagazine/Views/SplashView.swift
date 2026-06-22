@@ -8,12 +8,12 @@ import SwiftUI
 /// Wraps the auth screen with the welcome splash. The splash sits on top and is
 /// "cleared" by the ripple reveal, exposing AuthView beneath.
 struct WelcomeView: View {
-    let db: DatabaseService
+    let account: AccountManager
     @State private var revealed = false
 
     var body: some View {
         ZStack {
-            AuthView(db: db)
+            AuthView(account: account)
             if !revealed {
                 SplashView { revealed = true }
             }
