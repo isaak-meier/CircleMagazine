@@ -75,6 +75,7 @@ struct SplashView: View {
                 fire(at: location, in: geo.size)
             }
         }
+        .ignoresSafeArea()
         .task {
             try? await Task.sleep(for: .seconds(3))
             withAnimation(.easeIn(duration: 0.6)) { showHint = true }

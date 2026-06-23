@@ -26,7 +26,7 @@ struct CircleMagazineApp: App {
             switch account.authState {
             case .loading:   ProgressView()
             case .signedOut: WelcomeView(account: account)
-            case .signedIn:  CardFeedView(issueLoader: loader)
+            case .signedIn: RootTabView(issueLoader: loader, account: account)
             }
         }
     }

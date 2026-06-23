@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Circle — Post Detail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ink:        #0D0D0D;
+    --page:       #F8F7F4;
+    --rule:       #E0DDD7;
+    --meta:       #7A7672;
+    --edition:    #1A1A2E;
+    --body-text:  #2A2826;
+    --serif:      'Playfair Display', Georgia, serif;
+    --sans:       'Inter', system-ui, sans-serif;
+  }
+
+  html, body {
+    background: #DDDBD8;
+    min-height: 100vh;
+    font-family: var(--sans);
+    color: var(--ink);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 32px 16px 64px;
+    gap: 40px;
+  }
+
+  /* ─────────────────────────────
+     PHONE SHELL
+  ───────────────────────────── */
+  .phone {
+    width: 390px;
+    height: 844px;
+    background: var(--page);
+    border-radius: 44px;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 10px #1C1C1E,
+      0 32px 80px rgba(0,0,0,0.35),
+      0 8px 24px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  /* ─────────────────────────────
+     STATUS BAR (over hero image)
+  ───────────────────────────── */
+  .status-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 28px 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    z-index: 30;
+    pointer-events: none;
+  }
+  .status-bar .time { font-size: 15px; font-weight: 600; }
+  .status-icons { display: flex; gap: 6px; align-items: center; }
+  .status-icons svg { width: 16px; height: 16px; fill: #fff; }
+
+  /* ─────────────────────────────
+     HERO
+  ───────────────────────────── */
+  .hero {
+    position: relative;
+    flex-shrink: 0;
+    height: 320px;
+    overflow: hidden;
+  }
+  .hero-image {
+    width: 100%; height: 100%;
+    background: linear-gradient(155deg, #2D4A2D, #4A7A4A, #8BAF8B);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 64px;
+  }
+  /* gradient scrim — light at top (for status bar legibility), heavy at bottom (for title bleed) */
+  .hero-scrim {
+    position: absolute; inset: 0;
+    background: linear-gradient(
+      to bottom,
+      rgba(0,0,0,0.38) 0%,
+      transparent 30%,
+      transparent 52%,
+      rgba(0,0,0,0.72) 100%
+    );
+  }
+  /* close button */
+  .close-btn {
+    position: absolute;
+    top: 52px; left: 20px;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.36);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    z-index: 20;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .close-btn svg {
+    width: 14px; height: 14px;
+    stroke: #fff; stroke-width: 2;
+    stroke-linecap: round; fill: none;
+  }
+  /* share button */
+  .share-btn {
+    position: absolute;
+    top: 52px; right: 20px;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.36);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    z-index: 20;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .share-btn svg {
+    width: 14px; height: 14px;
+    stroke: #fff; stroke-width: 1.8;
+    stroke-linecap: round; stroke-linejoin: round; fill: none;
+  }
+  /* edition tag on hero */
+  .hero-edition-tag {
+    position: absolute;
+    bottom: 72px; left: 24px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.8);
+    z-index: 20;
+  }
+  /* title bleeds over the bottom of the hero */
+  .hero-title {
+    position: absolute;
+    bottom: 20px; left: 24px; right: 24px;
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    color: #fff;
+    z-index: 20;
+  }
+
+  /* ─────────────────────────────
+     STICKY AUTHOR BAR
+     (shown when scrolled past hero in real impl;
+      shown here as always-visible for mockup)
+  ───────────────────────────── */
+  .author-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--page);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 20;
+  }
+  .author-avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%; background: var(--rule);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+  }
+  .author-info { flex: 1; }
+  .author-name { font-size: 13px; font-weight: 600; line-height: 1.2; }
+  .author-meta { font-size: 11px; color: var(--meta); }
+  /* reaction buttons in author bar */
+  .author-bar-actions { display: flex; gap: 14px; align-items: center; }
+  .bar-reaction {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 12px; font-weight: 500; color: var(--meta); cursor: pointer;
+  }
+  .bar-reaction svg {
+    width: 16px; height: 16px;
+    stroke: var(--meta); fill: none; stroke-width: 1.7;
+  }
+  .bar-reaction.loved svg { stroke: #C0392B; fill: #C0392B; }
+  .bar-reaction.loved { color: #C0392B; }
+
+  /* ─────────────────────────────
+     SCROLLABLE BODY
+  ───────────────────────────── */
+  .post-body {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .post-body::-webkit-scrollbar { display: none; }
+
+  /* Lede paragraph — serif, larger */
+  .lede {
+    padding: 22px 24px 0;
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.65;
+    color: var(--body-text);
+    font-weight: 400;
+  }
+
+  /* Body paragraphs */
+  .body-graf {
+    padding: 16px 24px 0;
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--body-text);
+    font-weight: 400;
+  }
+
+  /* Pull quote within body */
+  .inline-pullquote {
+    margin: 20px 24px;
+    padding: 16px 18px;
+    border-left: 2.5px solid var(--ink);
+    background: rgba(0,0,0,0.028);
+    border-radius: 0 6px 6px 0;
+  }
+  .inline-pullquote p {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 16px;
+    line-height: 1.55;
+    color: #1A1816;
+  }
+
+  /* Tags row */
+  .tags-row {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    padding: 20px 24px 0;
+  }
+  .tag {
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--meta); background: var(--rule);
+    padding: 4px 10px; border-radius: 4px;
+  }
+
+  /* Divider */
+  .section-divider {
+    margin: 24px 24px 0;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .section-divider-line { flex: 1; height: 1px; background: var(--rule); }
+  .section-divider-label {
+    font-size: 9px; font-weight: 600;
+    letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--meta);
+  }
+
+  /* ─────────────────────────────
+     COMMENTS — "Letters" section
+  ───────────────────────────── */
+  .comments { padding: 0 24px; }
+
+  .comment {
+    padding: 16px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .comment:last-child { border-bottom: none; }
+
+  .comment-header {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+  }
+  .comment-avatar {
+    width: 26px; height: 26px;
+    border-radius: 50%; background: var(--rule);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; flex-shrink: 0;
+  }
+  .comment-name { font-size: 12px; font-weight: 600; }
+  .comment-time { font-size: 10.5px; color: var(--meta); margin-left: auto; }
+
+  .comment-text {
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--body-text);
+  }
+  .comment-love {
+    display: flex; align-items: center; gap: 4px;
+    margin-top: 8px;
+    font-size: 11px; color: var(--meta); cursor: pointer;
+  }
+  .comment-love svg {
+    width: 12px; height: 12px;
+    stroke: var(--meta); fill: none; stroke-width: 1.8;
+  }
+
+  /* ─────────────────────────────
+     COMMENT INPUT BAR
+  ───────────────────────────── */
+  .comment-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px 28px;
+    border-top: 1px solid var(--rule);
+    background: var(--page);
+    flex-shrink: 0;
+  }
+  .comment-bar-avatar {
+    width: 30px; height: 30px;
+    border-radius: 50%; background: var(--rule);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+  }
+  .comment-input {
+    flex: 1;
+    background: var(--rule);
+    border-radius: 20px;
+    padding: 9px 16px;
+    font-size: 13px;
+    color: var(--meta);
+    font-family: var(--sans);
+    letter-spacing: 0.01em;
+  }
+  .comment-send {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: var(--ink);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .comment-send svg {
+    width: 13px; height: 13px;
+    stroke: var(--page); fill: none; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round;
+    margin-left: 2px;
+  }
+
+  /* ─────────────────────────────
+     ANNOTATION PANEL (right side)
+  ───────────────────────────── */
+  .annotation-panel {
+    width: 300px;
+    flex-shrink: 0;
+    padding-top: 8px;
+  }
+  .annotation-title {
+    font-family: var(--serif);
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--ink);
+  }
+  .annotation-sub {
+    font-size: 12px;
+    color: var(--meta);
+    margin-bottom: 28px;
+    line-height: 1.5;
+  }
+
+  .annotation {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 28px;
+    position: relative;
+  }
+  .annotation::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 32px;
+    bottom: -28px;
+    width: 1px;
+    background: var(--rule);
+  }
+  .annotation:last-child::before { display: none; }
+
+  .annotation-num {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .annotation-num.accent {
+    background: var(--edition);
+  }
+  .annotation-body {}
+  .annotation-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--meta);
+    margin-bottom: 4px;
+  }
+  .annotation-text {
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--body-text);
+  }
+  .annotation-text strong { font-weight: 600; color: var(--ink); }
+
+  .annotation-rule {
+    height: 1px;
+    background: var(--rule);
+    margin: 24px 0;
+  }
+  .annotation-note {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--meta);
+    padding: 14px;
+    background: rgba(0,0,0,0.028);
+    border-radius: 8px;
+    border-left: 2px solid var(--rule);
+  }
+  .annotation-note strong { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- ════════════════ PHONE MOCKUP ════════════════ -->
+<div class="phone">
+
+  <!-- Status bar (white, over hero) -->
+  <div class="status-bar">
+    <span class="time">9:41</span>
+    <div class="status-icons">
+      <svg viewBox="0 0 16 12"><rect x="0" y="8" width="2.5" height="4" rx="0.5"/><rect x="4" y="5.5" width="2.5" height="6.5" rx="0.5"/><rect x="8" y="3" width="2.5" height="9" rx="0.5"/><rect x="12" y="0" width="2.5" height="12" rx="0.5"/></svg>
+      <svg viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 10.5a1 1 0 100-2 1 1 0 000 2z" fill="currentColor" stroke="none"/><path d="M4.5 7.5a5 5 0 017 0"/><path d="M1.5 4.5a9 9 0 0113 0"/></svg>
+      <svg viewBox="0 0 22 12"><rect x="0" y="1" width="18" height="10" rx="2" stroke="currentColor" stroke-width="1.2" fill="none"/><rect x="1.5" y="2.5" width="13" height="7" rx="1" fill="currentColor"/><path d="M19 4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </div>
+  </div>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="hero-image">🌲</div>
+    <div class="hero-scrim"></div>
+    <div class="close-btn">
+      <svg viewBox="0 0 14 14"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
+    </div>
+    <div class="share-btn">
+      <svg viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+    </div>
+    <div class="hero-edition-tag">This Sunday's Edition &nbsp;·&nbsp; June 22, 2026</div>
+    <div class="hero-title">Three weeks off the grid taught me what I actually want from life</div>
+  </div>
+
+  <!-- Sticky author bar -->
+  <div class="author-bar">
+    <div class="author-avatar">🎵</div>
+    <div class="author-info">
+      <div class="author-name">Dave Slater</div>
+      <div class="author-meta">5 min read &nbsp;·&nbsp; Posted this morning</div>
+    </div>
+    <div class="author-bar-actions">
+      <div class="bar-reaction loved">
+        <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        14
+      </div>
+      <div class="bar-reaction">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        3
+      </div>
+    </div>
+  </div>
+
+  <!-- Scrollable body -->
+  <div class="post-body">
+
+    <p class="lede">Somewhere around day five, I stopped reaching for my phone out of habit. Not because I was disciplined — there was no signal. But by the time I had bars again, I realized I hadn't missed it.</p>
+
+    <p class="body-graf">We drove out Friday night, nine of us crammed into two trucks, with enough food for a week and exactly zero plan. The campsite was three hours past the last gas station and had no name on the map — just a pin someone had dropped two summers ago and never deleted.</p>
+
+    <div class="inline-pullquote">
+      <p>"The most productive thing I did all week was watch the same sunset twice from different angles."</p>
+    </div>
+
+    <p class="body-graf">By day three I'd stopped wearing a watch. By day five I couldn't have told you what month it was without thinking about it. That felt alarming for about thirty seconds, and then it felt like the best thing that had happened to me in years.</p>
+
+    <p class="body-graf">What I noticed, coming back: I wanted less. Not in a monastic way — I still want my coffee and my good speakers and my comfortable bed. But the twenty tabs of research I had open before I left, the four side projects I was "about to start," the mental queue of things I owed people — none of it felt urgent anymore. A lot of it turned out to just be noise.</p>
+
+    <div class="tags-row">
+      <span class="tag">Reflection</span>
+      <span class="tag">Travel</span>
+      <span class="tag">Camping</span>
+    </div>
+
+    <!-- Comments section -->
+    <div class="section-divider">
+      <div class="section-divider-line"></div>
+      <div class="section-divider-label">3 Responses</div>
+      <div class="section-divider-line"></div>
+    </div>
+
+    <div class="comments">
+
+      <div class="comment">
+        <div class="comment-header">
+          <div class="comment-avatar">🌿</div>
+          <div class="comment-name">Arnell</div>
+          <div class="comment-time">2h ago</div>
+        </div>
+        <div class="comment-text">The "mental queue of things I owed people" line hit me harder than I expected. I need to do this.</div>
+        <div class="comment-love">
+          <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          4
+        </div>
+      </div>
+
+      <div class="comment">
+        <div class="comment-header">
+          <div class="comment-avatar">📷</div>
+          <div class="comment-name">Alex Kebbe</div>
+          <div class="comment-time">1h ago</div>
+        </div>
+        <div class="comment-text">Which campsite was this? Asking for entirely selfish reasons.</div>
+        <div class="comment-love">
+          <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          2
+        </div>
+      </div>
+
+      <div class="comment">
+        <div class="comment-header">
+          <div class="comment-avatar">🎧</div>
+          <div class="comment-name">Sawyer</div>
+          <div class="comment-time">45m ago</div>
+        </div>
+        <div class="comment-text">This is the kind of thing I tell myself I'll do and then don't. Good reminder.</div>
+        <div class="comment-love">
+          <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          1
+        </div>
+      </div>
+
+    </div>
+
+    <div style="height: 8px;"></div>
+  </div>
+
+  <!-- Comment input bar -->
+  <div class="comment-bar">
+    <div class="comment-bar-avatar">🎵</div>
+    <div class="comment-input">Add a response…</div>
+    <div class="comment-send">
+      <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+    </div>
+  </div>
+
+</div>
+
+<!-- ════════════════ ANNOTATION PANEL ════════════════ -->
+<div class="annotation-panel">
+  <div class="annotation-title">Post Detail — Design Notes</div>
+  <div class="annotation-sub">Decisions and rationale for the full-screen post view.</div>
+
+  <div class="annotation">
+    <div class="annotation-num accent">1</div>
+    <div class="annotation-body">
+      <div class="annotation-label">Hero treatment</div>
+      <div class="annotation-text">Media is <strong>full-bleed, edge-to-edge</strong> — no padding, no card container. Tapping a card should feel like <em>opening</em> it, not pushing to a new screen. The title bleeds over the bottom of the hero with a gradient scrim, so text and image feel unified, not stacked.</div>
+    </div>
+  </div>
+
+  <div class="annotation">
+    <div class="annotation-num">2</div>
+    <div class="annotation-body">
+      <div class="annotation-label">Close + Share</div>
+      <div class="annotation-text">X button (not a back chevron) signals this is a <strong>modal expand</strong>, not a navigation push. Frosted glass pills keep them legible over any image. Share is top-right — far from the close, so no mis-taps.</div>
+    </div>
+  </div>
+
+  <div class="annotation">
+    <div class="annotation-num">3</div>
+    <div class="annotation-body">
+      <div class="annotation-label">Sticky author bar</div>
+      <div class="annotation-text">Appears once the hero scrolls out of view. Keeps <strong>authorship anchored</strong> while reading — you always know whose piece this is. Reactions live here too so they're reachable mid-scroll without going back to the top.</div>
+    </div>
+  </div>
+
+  <div class="annotation">
+    <div class="annotation-num">4</div>
+    <div class="annotation-body">
+      <div class="annotation-label">Typography hierarchy</div>
+      <div class="annotation-text">Lede paragraph uses <strong>Playfair Display 17pt</strong> — serif, slightly larger than body. Signals "you are reading something." Subsequent grafs drop to Inter 15pt. Pull-quotes stay serif italic with the left-rule treatment from the card feed, so the design language is consistent.</div>
+    </div>
+  </div>
+
+  <div class="annotation">
+    <div class="annotation-num">5</div>
+    <div class="annotation-body">
+      <div class="annotation-label">Comments as "Responses"</div>
+      <div class="annotation-text">Relabeled from "Comments" to <strong>"3 Responses"</strong> — frames replies as letters to an author, not a social feed. No nested threads, no likes-on-comments counter. Intentionally limited to maintain the editorial tone.</div>
+    </div>
+  </div>
+
+  <div class="annotation">
+    <div class="annotation-num">6</div>
+    <div class="annotation-body">
+      <div class="annotation-label">Comment input</div>
+      <div class="annotation-text">Placeholder reads <strong>"Add a response…"</strong> (not "Write a comment"). Small but reinforces the magazine-letters framing. Your own avatar appears left of the input so the reply feels personal.</div>
+    </div>
+  </div>
+
+  <div class="annotation-rule"></div>
+
+  <div class="annotation-note">
+    <strong>For video posts:</strong> hero becomes a full-bleed video player with scrubber. Tap anywhere on hero to play/pause. Author bar appears immediately (not scroll-triggered) since there's no static image to scroll past.<br><br>
+    <strong>For gallery posts:</strong> hero becomes a swipeable full-screen photo carousel with a dot indicator. Pinch-to-zoom enabled per frame.<br><br>
+    <strong>For text-only posts:</strong> no hero image. Instead, the title appears large at the top with the edition stamp, and the body begins immediately below the author bar. Background stays the page color.
+  </div>
+
+</div>
+
+</body>
+</html>

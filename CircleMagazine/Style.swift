@@ -36,6 +36,12 @@ enum Style {
     static let wordmark  = Font.system(size: 28, weight: .bold, design: .serif)
     static let cardTitle = Font.system(size: 19, weight: .bold, design: .serif)
     static let pullQuote = Font.system(size: 17, design: .serif)
+    static let field     = Font.system(size: 16)                     // text input
+    static let button    = Font.system(size: 15, weight: .semibold)  // primary action
+    static let stamp     = Font.system(size: 10.5, weight: .medium)  // edition date stamp
+    static let body      = Font.system(size: 13)                     // secondary body / captions / errors
+    static let link      = Font.system(size: 13, weight: .medium)    // quiet secondary action
+    static let eyebrow   = Font.system(size: 9, weight: .semibold)   // small-caps section label
 }
 
 extension Color {

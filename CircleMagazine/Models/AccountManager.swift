@@ -11,15 +11,21 @@ import Foundation
 import Observation
 import Supabase
 
+enum AccountError: LocalizedError {
+  case profileMissingAfterCreate
+  var errorDescription: String? { "Account was created but its profile could not be loaded" }
+}
+
 @Observable
 @MainActor
 final class AccountManager {
   let db: DatabaseService
 
-  enum AuthState { case loading, signedOut, signedIn }
+  enum AuthState { case loading, signedOut, signedIn(User) }
   enum Step { case email, code, username }
 
   // Session status — the App switches on this, like IssueLoader.loadState.
+  // .signedIn carries the user's profile row.
   private(set) var authState: AuthState = .loading
 
   // Sign-in flow state (moved out of AuthView).
@@ -50,14 +56,15 @@ final class AccountManager {
   private func evaluate(_ session: Session?) async {
     guard session != nil else { authState = .signedOut; return }
     // ponytail: session-but-no-profile (app killed mid-signup) falls back to signedOut → re-OTP. Rare; add a .needsProfile state if it bites.
-    authState = ((try? await hasProfile()) ?? false) ? .signedIn : .signedOut
+    if let user = try? await fetchProfile() { authState = .signedIn(user) }
+    else { authState = .signedOut }
   }
 
-  private func hasProfile() async throws -> Bool {
+  private func fetchProfile() async throws -> User? {
     let uid = try await db.supabase.auth.session.user.id
     let rows: [User] = try await db.supabase.from("users")
       .select().eq("id", value: uid.uuidString).limit(1).execute().value
-    return !rows.isEmpty
+    return rows.first
   }
 
   func signOut() async throws {
@@ -80,7 +87,7 @@ final class AccountManager {
   func verify() async {
     await run {
       try await self.db.supabase.auth.verifyOTP(email: self.email, token: self.code, type: .email)
-      if try await self.hasProfile() { self.authState = .signedIn } else { self.step = .username }
+      if let user = try await self.fetchProfile() { self.authState = .signedIn(user) } else { self.step = .username }
     }
   }
 
@@ -88,7 +95,8 @@ final class AccountManager {
     await run {
       let userId = try await self.db.supabase.auth.session.user.id
       try await self.db.supabase.from("users").insert(UserInsert(id: userId, username: self.username)).execute()
-      self.authState = .signedIn
+      guard let user = try await self.fetchProfile() else { throw AccountError.profileMissingAfterCreate }
+      self.authState = .signedIn(user)
     }
   }
 

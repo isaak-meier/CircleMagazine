@@ -2,25 +2,20 @@
 //  CardView.swift
 //  CircleMagazine
 //
-//  One card: a fixed-size shell (handle · author · media · title/excerpt · tags)
-//  whose media region switches on the page's media combination (cardTemplate).
 //
 
 import SwiftUI
 import AVKit
 
 struct CardView: View {
-    let card: Card
+    let viewModel: CardViewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             handle
-            author
-            CardMediaRegion(card: card)
+            CardMediaRegion(card: viewModel)
                 .padding(.horizontal, Style.Space.lg)
-            cardBody
             Spacer(minLength: 0)
-            footer
         }
         .background(Style.paper)
         .clipShape(RoundedRectangle(cornerRadius: Style.cardRadius))
@@ -33,65 +28,43 @@ struct CardView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 10).padding(.bottom, 6)
     }
-
-    private var author: some View {
-        HStack(spacing: 9) {
-            Text(card.authorAvatar)
-                .font(.system(size: 15))
-                .frame(width: 32, height: 32)
-                .background(SwiftUI.Circle().fill(Style.rule))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(card.authorName).font(.system(size: 13, weight: .semibold)).foregroundStyle(Style.ink)
-                Text(card.timeText).font(.system(size: 10.5)).foregroundStyle(Style.meta)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, Style.Space.lg)
-        .padding(.bottom, Style.Space.md)
-    }
-
-    private var cardBody: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(card.title)
-                .font(Style.cardTitle).foregroundStyle(Style.ink)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(card.excerpt)
-                .font(.system(size: 13)).foregroundStyle(Style.ink.opacity(0.78))
-                .lineLimit(2).lineSpacing(2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Style.Space.lg)
-        .padding(.top, Style.Space.md)
-    }
-
-    private var footer: some View {
-        HStack(spacing: Style.Space.sm) {
-            ForEach(card.tags, id: \.self) { tag in
-                Text(tag.uppercased())
-                    .font(.system(size: 9.5, weight: .medium)).tracking(0.6)
-                    .foregroundStyle(Style.meta)
-                    .padding(.horizontal, Style.Space.sm).padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(Style.rule))
-            }
-            Spacer()
-        }
-        .padding(.horizontal, Style.Space.lg)
-        .padding(.vertical, Style.Space.md)
-    }
 }
 
 // MARK: - Media region (one per template)
 
 private struct CardMediaRegion: View {
-    let card: Card
+    let card: CardViewModel
 
     var body: some View {
         switch cardTemplate(for: card.media) {
         case .photo, .fallback: PhotoMedia(url: url(.image))
         case .video:            VideoMedia()
         case .photoAudio:       PhotoAudioMedia(url: url(.image), audioURL: url(.audio))
+        case .photoText:
+            VStack(spacing: Style.Space.md) {
+                PhotoMedia(url: url(.image))
+                textBlock
+            }
+        case .photoAudioText:
+            VStack(spacing: Style.Space.md) {
+                PhotoAudioMedia(url: url(.image), audioURL: url(.audio))
+                textBlock
+            }
         case .pullquote:        PullQuoteMedia(text: quote)
         }
+    }
+
+    /// All text widgets, in position order, stacked below the image.
+    private var textBlock: some View {
+        Text(allText)
+            .font(Style.body).foregroundStyle(Style.ink.opacity(0.78))
+            .lineSpacing(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var allText: String {
+        card.media.filter { $0.widgetType == .text }
+            .compactMap(\.textContent).joined(separator: "\n\n")
     }
 
     private var quote: String { card.media.first { $0.widgetType == .text }?.textContent ?? "" }
@@ -194,7 +167,7 @@ private struct PullQuoteMedia: View {
 
 #if DEBUG
 #Preview("Card") {
-    CardView(card: Card.sample[0])
+    CardView(viewModel: CardViewModel(from: Magazine.sample.pages[0]))
         .frame(height: 600)
         .padding()
         .background(Style.chrome)
