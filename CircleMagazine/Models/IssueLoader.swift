@@ -12,9 +12,12 @@ struct Magazine {
   let pages: [MagazinePage]
 }
 
-struct MagazinePage {
+struct MagazinePage: Identifiable {
   let page: Page
   let widgets: [PageMedia]
+    var id: UUID {
+      page.id
+  }
 }
 
 enum IssueLoadState {
@@ -29,12 +32,6 @@ final class IssueLoader {
   let db: DatabaseService
   private(set) var loadState: IssueLoadState = .loading
 
-  #if DEBUG
-  /// Preview-only: stalls refresh so the pull-to-refresh spinner is visible.
-  /// Compiled out of release builds.
-  var previewRefreshDelay: Duration?
-  #endif
-
   init(db: DatabaseService) {
     self.db = db
   }
@@ -48,9 +45,6 @@ final class IssueLoader {
   /// Force a full fetch and replace the cache. No `.loading` flip, so an
   /// already-loaded magazine stays on screen until the new one arrives.
   func refresh() async {
-    #if DEBUG
-    if let previewRefreshDelay { try? await Task.sleep(for: previewRefreshDelay) }
-    #endif
     do {
       loadState = .loaded(try await db.fetchCurrentIssue())
     } catch {

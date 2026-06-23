@@ -9,12 +9,19 @@
 import SwiftUI
 
 struct CardFeedView: View {
-    var cards: [Card] = Card.sample
+    let issueLoader: IssueLoader
 
     var body: some View {
         VStack(spacing: 0) {
             masthead
-            viewport
+            switch issueLoader.loadState {
+                case .loading:
+                    ProgressView()
+                case .loaded(let magazine):
+                    viewport(for: magazine)
+                case .failedToLoad(let errorStr):
+                    Text(errorStr)
+            }
             navBar
         }
         .background(Style.chrome)
@@ -42,22 +49,21 @@ struct CardFeedView: View {
 
     // MARK: Peek-paged card viewport
 
-    private var viewport: some View {
+    private func viewport(for magazine: Magazine) -> some View {
         GeometryReader { geo in
             let peek = Style.Space.xxl              // sliver of the neighbour cards
             let cardHeight = geo.size.height - peek * 2
             ScrollView(.vertical) {
                 LazyVStack(spacing: Style.Space.sm) {
-                    ForEach(cards) { card in
-                        CardView(card: card)
+                    ForEach(magazine.pages) { page in
+                        CardView(from: page)
                             .frame(height: cardHeight)
                             .padding(.horizontal, Style.Space.md)
                     }
                 }
                 .scrollTargetLayout()
             }
-            // viewAligned snaps to each card; peek margin centers it (paging would
-            // snap by viewport height and drift, since cards are < viewport tall).
+            // viewAligned snaps to each card;
             .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
             .contentMargins(.vertical, peek, for: .scrollContent)
             .scrollIndicators(.hidden)
