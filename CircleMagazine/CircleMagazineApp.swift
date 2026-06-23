@@ -26,7 +26,7 @@ struct CircleMagazineApp: App {
             switch account.authState {
             case .loading:   ProgressView()
             case .signedOut: WelcomeView(account: account)
-            case .signedIn:  MagazineView(loader: loader)
+            case .signedIn:  CardFeedView()   // ponytail: sample cards for now; wire loader.magazine.pages next
             }
         }
     }

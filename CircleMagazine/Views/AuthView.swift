@@ -9,7 +9,7 @@ struct AuthView: View {
     @Bindable var account: AccountManager
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: Style.Space.lg) {
             switch account.step {
             case .email:
                 Text("Enter your email").font(.headline)
