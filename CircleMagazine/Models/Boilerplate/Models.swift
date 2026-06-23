@@ -74,6 +74,28 @@ struct Issue: Codable {
     }
 }
 
+extension Issue {
+    /// `publish_date` ("2026-06-17") rendered for the masthead, e.g. "JUNE 17, 2026".
+    /// Falls back to the raw string if it isn't a parseable date.
+    var editionDate: String {
+        guard let date = Self.dateParser.date(from: publishDate) else { return publishDate }
+        return Self.editionFormatter.string(from: date).uppercased()
+    }
+
+    private static let dateParser: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+    private static let editionFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US")
+        f.dateFormat = "MMMM d, yyyy"
+        return f
+    }()
+}
+
 struct PageMedia: Codable, Identifiable {
     let id: UUID
     let pageId: UUID?

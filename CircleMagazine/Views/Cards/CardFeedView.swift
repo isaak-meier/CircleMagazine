@@ -14,7 +14,7 @@ struct CardFeedView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Masthead(title: "Circle", editionDate: "JUNE 22, 2026")
+            Masthead(title: "Circle", editionDate: editionDate)
             switch issueLoader.loadState {
                 case .loading:
                     Spacer()
@@ -29,6 +29,12 @@ struct CardFeedView: View {
         }
         .background(Style.chrome)
         .task { await issueLoader.refreshIfNeeded() }
+    }
+
+    // The live issue's date once loaded; nil (no stamp) while loading/failed.
+    private var editionDate: String? {
+        guard case .loaded(let magazine) = issueLoader.loadState else { return nil }
+        return magazine.issue.editionDate
     }
 
     // MARK: Peek-paged card viewport

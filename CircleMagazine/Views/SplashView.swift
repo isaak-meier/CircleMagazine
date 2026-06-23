@@ -27,7 +27,8 @@ struct SplashView: View {
     @State private var showHint = false
     @State private var tap: CGPoint?
     @State private var holeRadius: CGFloat = 0
-    @State private var ripple: CGFloat = 0
+
+    private let rippleDuration: TimeInterval = 1.2
 
     var body: some View {
         GeometryReader { geo in
@@ -39,20 +40,7 @@ struct SplashView: View {
                 ZStack {
                     SwiftUI.Circle().fill(.black).frame(width: d, height: d)
                     ArcText("Welcome to Circle", radius: d / 2 + 22, perChar: .degrees(9))
-                        .font(.title3.bold())
-                }
-
-                // Expanding ripple rings from the tap point.
-                if let tap {
-                    let maxR = maxRadius(from: tap, in: geo.size)
-                    ForEach(0..<3) { i in
-                        let phase = ripple - CGFloat(i) * 0.18
-                        SwiftUI.Circle()
-                            .stroke(.black.opacity(0.25), lineWidth: 2)
-                            .frame(width: max(0, phase) * maxR * 2, height: max(0, phase) * maxR * 2)
-                            .position(tap)
-                            .opacity(Double(1 - max(0, min(1, phase))))
-                    }
+                        .font(Style.cardTitle)
                 }
 
                 VStack {
@@ -62,6 +50,11 @@ struct SplashView: View {
                         .opacity(showHint ? 1 : 0)
                         .padding(.bottom, 40)
                 }
+            }
+            .keyframeAnimator(initialValue: 0.0, trigger: tap) { view, elapsedTime in
+                view.modifier(RippleModifier(origin: tap, elapsedTime: elapsedTime, duration: rippleDuration))
+            } keyframes: { _ in
+                LinearKeyframe(rippleDuration, duration: rippleDuration)
             }
             .contentShape(Rectangle())
             .mask {
@@ -89,9 +82,46 @@ struct SplashView: View {
     private func fire(at location: CGPoint, in size: CGSize) {
         guard tap == nil else { return }
         tap = location
-        withAnimation(.easeIn(duration: 0.7)) { holeRadius = maxRadius(from: location, in: size) }
-        withAnimation(.easeOut(duration: 1.1)) { ripple = 1.4 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { onReveal() }
+        withAnimation(.easeIn(duration: 0.9)) { holeRadius = maxRadius(from: location, in: size) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + rippleDuration) { onReveal() }
+    }
+}
+
+/// Plays the `Ripple` Metal shader as a `layerEffect` radiating from `origin`.
+/// `elapsedTime` is animated 0…duration to drive the wave; inert until a tap sets
+/// an origin, so it doesn't fire on first appearance.
+private struct RippleModifier: ViewModifier {
+    var origin: CGPoint?
+    var elapsedTime: TimeInterval
+    var duration: TimeInterval
+
+    var amplitude: Double = 12
+    var frequency: Double = 15
+    var decay: Double = 8
+    var speed: Double = 1200
+
+    // Only attach the layerEffect once a tap is in flight. Attaching it at all
+    // forces SwiftUI to compile the Metal pipeline — and on the Simulator that
+    // compile takes seconds, which is what hung the app at launch.
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let o = origin, elapsedTime > 0, elapsedTime < duration {
+            content.visualEffect { view, _ in
+                view.layerEffect(
+                    ShaderLibrary.Ripple(
+                        .float2(o),
+                        .float(Float(elapsedTime)),
+                        .float(Float(amplitude)),
+                        .float(Float(frequency)),
+                        .float(Float(decay)),
+                        .float(Float(speed))
+                    ),
+                    maxSampleOffset: CGSize(width: amplitude, height: amplitude)
+                )
+            }
+        } else {
+            content
+        }
     }
 }
 
@@ -140,5 +170,5 @@ private struct HoleShape: Shape {
     }
 }
 
-// ponytail: SwiftUI reveal + expanding rings, not a true water-distortion shader.
-// For literal pond refraction, add Apple's Metal ripple layerEffect — say so.
+// Note: the ripple is a Metal shader and won't render in the canvas — run on a
+// simulator/device to see the tap distortion.
