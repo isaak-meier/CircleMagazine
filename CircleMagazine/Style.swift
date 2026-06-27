@@ -40,6 +40,7 @@ enum Style {
     static let button    = Font.system(size: 15, weight: .semibold)  // primary action
     static let stamp     = Font.system(size: 10.5, weight: .medium)  // edition date stamp
     static let body      = Font.system(size: 13)                     // secondary body / captions / errors
+    static let byline    = Font.system(size: 13, weight: .semibold)  // card author name / avatar initial
     static let link      = Font.system(size: 13, weight: .medium)    // quiet secondary action
     static let eyebrow   = Font.system(size: 9, weight: .semibold)   // small-caps section label
 }

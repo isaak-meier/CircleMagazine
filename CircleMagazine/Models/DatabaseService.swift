@@ -69,7 +69,15 @@ final class DatabaseService {
     guard !media.isEmpty else { throw IssueError.emptyData }
     let byPage = Dictionary(grouping: media, by: \.pageId)
 
-    let result = pages.map { MagazinePage(page: $0, widgets: byPage[$0.id] ?? []) }
+    // Authors — one round trip for every page's submitter, keyed by id.
+    let authorIds = Array(Set(pages.compactMap(\.submittedBy?.uuidString)))
+    let authors: [User] = authorIds.isEmpty ? [] : try await supabase.from("users")
+      .select().in("id", values: authorIds).execute().value
+    let byId = Dictionary(uniqueKeysWithValues: authors.map { ($0.id, $0) })
+
+    let result = pages.map {
+      MagazinePage(page: $0, pageMedia: byPage[$0.id] ?? [], author: $0.submittedBy.flatMap { byId[$0] })
+    }
     return Magazine(issue: issue, pages: result)
   }
 

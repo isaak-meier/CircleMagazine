@@ -21,7 +21,8 @@ struct Magazine {
 
 struct MagazinePage {
     let page: Page
-    let widgets: [PageMedia]
+    let pageMedia: [PageMedia]
+    var author: User? = nil
 }
 
 extension Magazine {
@@ -33,10 +34,10 @@ extension Magazine {
             PageMedia(id: UUID(), pageId: nil, mediaUrl: url, mediaType: type,
                       textContent: text, position: pos, createdAt: nil)
         }
-        let cover = MagazinePage(page: page(), widgets: [
+        let cover = MagazinePage(page: page(), pageMedia: [
             media("image", url: "https://picsum.photos/seed/cover/800/1200", 0)
         ])
-        let spread1 = MagazinePage(page: page(), widgets: [
+        let spread1 = MagazinePage(page: page(), pageMedia: [
             media("text", text: """
       You do not have to be good. You do not have to walk on your knees \
       for a hundred miles through the desert, repenting. You only have to let \
@@ -46,7 +47,7 @@ extension Magazine {
             media("image", url: "https://picsum.photos/seed/b/600", 2),
             media("text", text: "On slowness, and the things we miss when we rush.", 3),
         ])
-        let spread2 = MagazinePage(page: page(), widgets: [
+        let spread2 = MagazinePage(page: page(), pageMedia: [
             media("text", text: """
       ⊹˚₊  𝐀𝐅𝐅𝚰𝐑𝐌𝐀𝐓𝚰𝐎𝐍𝐒  ₊˚⊹
       

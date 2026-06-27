@@ -11,15 +11,35 @@ struct CardView: View {
     let viewModel: CardViewModel
 
     var body: some View {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Style.paper)
+            .clipShape(RoundedRectangle(cornerRadius: Style.cardRadius))
+            .shadow(color: .black.opacity(0.13), radius: 16, y: 4)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        // ponytail: .first — video-only cards; switch on the full array if mixed cards appear
+        switch viewModel.media.first {
+            case .video(let source): VideoCard(source)
+            case .image(let url): standardCard()
+            case .fallback(let error): standardCard()
+        }
+    }
+
+    private var standardCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             handle
+            if let author = viewModel.author {
+                AuthorRow(author: author)
+                    .padding(.horizontal, Style.Space.lg)
+                    .padding(.bottom, Style.Space.md)
+            }
             CardMediaRegion(card: viewModel)
                 .padding(.horizontal, Style.Space.lg)
             Spacer(minLength: 0)
         }
-        .background(Style.paper)
-        .clipShape(RoundedRectangle(cornerRadius: Style.cardRadius))
-        .shadow(color: .black.opacity(0.13), radius: 16, y: 4)
     }
 
     private var handle: some View {
@@ -30,46 +50,39 @@ struct CardView: View {
     }
 }
 
-// MARK: - Media region (one per template)
+// MARK: - Author row
+
+private struct AuthorRow: View {
+    let author: User
+
+    var body: some View {
+        HStack(spacing: 9) {
+            avatar
+            Text(author.username).font(Style.byline).foregroundStyle(Style.ink)
+        }
+    }
+
+    private var avatar: some View {
+        AsyncImage(url: author.avatarUrl.flatMap(URL.init(string:))) { $0.resizable().scaledToFill() }
+            placeholder: {
+                Style.rule.overlay(
+                    Text(author.username.prefix(1)).font(Style.byline)
+                        .foregroundStyle(Style.meta))
+            }
+            .frame(width: 32, height: 32).clipShape(SwiftUI.Circle())
+    }
+}
+
+// MARK: - Media region
 
 private struct CardMediaRegion: View {
     let card: CardViewModel
 
+    @ViewBuilder
     var body: some View {
-        switch cardTemplate(for: card.media) {
-        case .photo, .fallback: PhotoMedia(url: url(.image))
-        case .video:            VideoMedia()
-        case .photoAudio:       PhotoAudioMedia(url: url(.image), audioURL: url(.audio))
-        case .photoText:
-            VStack(spacing: Style.Space.md) {
-                PhotoMedia(url: url(.image))
-                textBlock
-            }
-        case .photoAudioText:
-            VStack(spacing: Style.Space.md) {
-                PhotoAudioMedia(url: url(.image), audioURL: url(.audio))
-                textBlock
-            }
-        case .pullquote:        PullQuoteMedia(text: quote)
+        if case .image(let url) = card.media.first {
+            PhotoMedia(url: url)
         }
-    }
-
-    /// All text widgets, in position order, stacked below the image.
-    private var textBlock: some View {
-        Text(allText)
-            .font(Style.body).foregroundStyle(Style.ink.opacity(0.78))
-            .lineSpacing(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var allText: String {
-        card.media.filter { $0.widgetType == .text }
-            .compactMap(\.textContent).joined(separator: "\n\n")
-    }
-
-    private var quote: String { card.media.first { $0.widgetType == .text }?.textContent ?? "" }
-    private func url(_ type: WidgetType) -> URL? {
-        card.media.first { $0.widgetType == type }?.mediaUrl.flatMap(URL.init(string:))
     }
 }
 
@@ -84,84 +97,49 @@ private struct PhotoMedia: View {
     }
 }
 
-private struct VideoMedia: View {
+// Full-bleed video card: video fills the whole card, author pinned to the bottom.
+private struct VideoCard: View {
+
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(hex: 0x0F2027), Color(hex: 0x203A43), Color(hex: 0x2C5364)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
             Image(systemName: "play.fill")
-                .font(.system(size: 18)).foregroundStyle(Style.ink)
-                .padding(17).background(SwiftUI.Circle().fill(.white.opacity(0.93)))
-            VStack {
-                HStack {
-                    tag("VIDEO", bg: .black.opacity(0.38)); Spacer()
-                }
-                Spacer()
-                HStack { Spacer(); tag("1:24", bg: .black.opacity(0.5)) }
-            }
-            .padding(10)
-        }
-        .frame(maxWidth: .infinity).frame(height: mediaHeight)
-        .clipShape(RoundedRectangle(cornerRadius: Style.mediaRadius))
-    }
-    private func tag(_ s: String, bg: Color) -> some View {
-        Text(s).font(.system(size: 9.5, weight: .semibold)).tracking(0.8)
-            .foregroundStyle(.white.opacity(0.92))
-            .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(RoundedRectangle(cornerRadius: 3).fill(bg))
-    }
-}
-
-private struct PhotoAudioMedia: View {
-    let url: URL?
-    let audioURL: URL?
-    @State private var player: AVPlayer?
-    @State private var playing = false
-
-    var body: some View {
-        ZStack {
-            AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Rectangle().fill(Style.rule) }
-            LinearGradient(colors: [.clear, .black.opacity(0.45)], startPoint: .center, endPoint: .bottom)
-            Button(action: toggle) {
-                Image(systemName: playing ? "pause.fill" : "play.fill")
-                    .font(.system(size: 16)).foregroundStyle(Style.ink)
-                    .padding(15).background(SwiftUI.Circle().fill(.white.opacity(0.93)))
-            }
-            VStack {
-                Spacer()
-                HStack(spacing: 5) {
-                    Image(systemName: "music.note").font(.system(size: 10))
-                    Text("Now playing").font(.system(size: 11, weight: .medium))
-                    Spacer()
-                }
-                .foregroundStyle(.white).padding(12)
+                .font(.system(size: 22)).foregroundStyle(Style.ink)
+                .padding(20).background(SwiftUI.Circle().fill(.white.opacity(0.93)))
+            VStack(spacing: 0) {
+                handle
+                Spacer(minLength: 0)
+                author
             }
         }
-        .frame(maxWidth: .infinity).frame(height: mediaHeight)
-        .clipShape(RoundedRectangle(cornerRadius: Style.mediaRadius))
-        .onDisappear { player?.pause() }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func toggle() {
-        if player == nil, let audioURL { player = AVPlayer(url: audioURL) }
-        playing ? player?.pause() : player?.play()
-        playing.toggle()
+    private var handle: some View {
+        Capsule().fill(.white.opacity(0.6))
+            .frame(width: 36, height: 4)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 10)
     }
-}
 
-private struct PullQuoteMedia: View {
-    let text: String
-    var body: some View {
-        HStack {
-            Text("“\(text)”").font(Style.pullQuote).italic()
-                .foregroundStyle(Color(hex: 0x2A2826)).lineSpacing(5)
+    // ponytail: hardcoded per request — swap for viewModel.author once the bio field exists.
+    private var author: some View {
+        HStack(alignment: .top, spacing: 9) {
+            SwiftUI.Circle().fill(.white.opacity(0.22))
+                .frame(width: 36, height: 36)
+                .overlay(Text("P").font(Style.byline).foregroundStyle(.white))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Philly Bum Bum").font(Style.byline).foregroundStyle(.white)
+                Text("Bum about town. Hoagie purist. I film the city while it sleeps.")
+                    .font(Style.body).foregroundStyle(.white.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer(minLength: 0)
         }
         .padding(Style.Space.lg)
-        .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
-        .background(Color.black.opacity(0.025))
-        .overlay(alignment: .leading) { Rectangle().fill(Style.ink).frame(width: 2.5) }
-        .clipShape(RoundedRectangle(cornerRadius: Style.mediaRadius))
+        .padding(.top, Style.Space.xl)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(LinearGradient(colors: [.clear, .black.opacity(0.78)],
+                                   startPoint: .top, endPoint: .bottom))
     }
 }
 
