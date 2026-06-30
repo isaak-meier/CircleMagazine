@@ -14,7 +14,7 @@ struct AuthView: View {
             VStack(alignment: .leading, spacing: Style.Space.lg) {
                 content
                 if let errorText = account.errorText {
-                    Text(errorText).font(Style.body).foregroundStyle(.red)
+                    ErrorBanner(message: errorText)
                 }
             }
             .padding(.horizontal, Style.Space.lg)

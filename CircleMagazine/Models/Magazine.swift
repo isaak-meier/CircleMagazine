@@ -35,8 +35,9 @@ extension Magazine {
         /// Sample issue for previews — a cover plus two mixed widget spreads.
     static let sample: Magazine = {
         let issueId = UUID()
-        func page(caption: String? = nil) -> Page {
-            Page(id: UUID(), issueId: issueId, submittedBy: nil, caption: caption, createdAt: nil)
+        func page(title: String? = nil, caption: String? = nil) -> Page {
+            Page(id: UUID(), issueId: issueId, submittedBy: nil,
+                 title: title, caption: caption, createdAt: nil)
         }
         func media(_ type: String, url: String? = nil, text: String? = nil, _ pos: Int) -> PageMedia {
             PageMedia(id: UUID(), pageId: nil, mediaUrl: url, mediaType: type,
@@ -47,7 +48,8 @@ extension Magazine {
             avatarUrl: nil, role: nil, followCredits: nil, circleSlots: nil,
             isVerified: nil, createdAt: nil)
         let videoCard = MagazinePage(
-            page: page(caption: "This shit is SO DOPE!!"),
+            page: page(title: "I Spent 3 Weeks Living Off-Grid in the Mountains",
+                       caption: "This shit is SO DOPE!!"),
             pageMedia: [media("video", url: "https://www.youtube.com/watch?v=62bIsvRcPv0", 0)],
             author: philly)
         let jack = User(

@@ -11,11 +11,13 @@ struct CardViewModel: Identifiable {
     let id: UUID
     let media: [CardMediaViewModel]     // the page's media, in position order
     let author: User?
+    let title: String?
     let caption: String?
 
     init(from page: MagazinePage) {
         self.id = page.page.id
         self.author = page.author
+        self.title = page.page.title
         self.caption = page.page.caption
         self.media = page.pageMedia
             .sorted { ($0.position ?? 0) < ($1.position ?? 0) }
@@ -55,10 +57,15 @@ enum VideoSource {
 
     init?(_ url: URL) {
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let host = components?.host ?? ""
 
-        // Is it YouTube? www., m., and bare youtube.com all match.
-        if components?.host?.contains("youtube.com") == true {
-                // It's YouTube — pull the id from ?v=… ; no id ⇒ bogus link, reject.
+        if host.contains("youtu.be") {
+                // Short share link: the id is the path, e.g. youtu.be/aB3xK9q
+            guard let id = url.pathComponents.last, url.pathComponents.count > 1, !id.isEmpty
+            else { return nil }
+            self = .youtube(id: id)
+        } else if host.contains("youtube.com") {
+                // Watch link — id is in ?v=… ; no id ⇒ bogus link, reject.
             guard let id = components?.queryItems?.first(where: { $0.name == "v" })?.value,
                   !id.isEmpty
             else { return nil }

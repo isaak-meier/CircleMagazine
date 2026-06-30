@@ -89,6 +89,51 @@ final class DatabaseService {
     return issues.first?.id
   }
 
+  // MARK: - Writes
+
+  /// Creates a video post. For a YouTube URL we look up the real video title via
+  /// oEmbed and store it on the page, so the feed can read `pages.title` without
+  /// any per-render network calls. Title lookup is best-effort — a failure just
+  /// leaves the title nil rather than blocking the post.
+  @discardableResult
+  func createVideoPost(issueId: UUID, authorId: UUID, videoURL: URL, caption: String?) async throws -> Page {
+    var title: String?
+    if case .youtube(let id)? = VideoSource(videoURL) {
+      title = await YouTubeOEmbed.title(forVideoID: id)
+    }
+    let page: Page = try await supabase.from("pages")
+      .insert(PageInsert(issueId: issueId, submittedBy: authorId, title: title, caption: caption))
+      .select().single().execute().value
+    try await supabase.from("page_media")
+      .insert(PageMediaInsert(pageId: page.id, mediaUrl: videoURL.absoluteString,
+                              mediaType: "video", position: 0))
+      .execute()
+    return page
+  }
+
+}
+
+/// Keyless lookup of a YouTube video's public title via the official oEmbed
+/// endpoint (no API key, no quota). Used at post-creation to cache the title.
+enum YouTubeOEmbed {
+  private struct Response: Decodable { let title: String }
+
+  /// The video's title, or nil if it's private/removed or the request fails.
+  static func title(forVideoID id: String) async -> String? {
+    guard var components = URLComponents(string: "https://www.youtube.com/oembed") else { return nil }
+    components.queryItems = [
+      URLQueryItem(name: "url", value: "https://www.youtube.com/watch?v=\(id)"),
+      URLQueryItem(name: "format", value: "json"),
+    ]
+    guard let url = components.url else { return nil }
+    do {
+      let (data, response) = try await URLSession.shared.data(from: url)
+      guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+      return try JSONDecoder().decode(Response.self, from: data).title
+    } catch {
+      return nil
+    }
+  }
 }
 
 private enum Config {

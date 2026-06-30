@@ -42,8 +42,9 @@ struct CardFeedView: View {
 
     private func viewport(for magazine: Magazine) -> some View {
         GeometryReader { geo in
-            let peek = Style.Space.xxl              // sliver of the neighbour cards
-            let cardHeight = geo.size.height - peek * 2
+            let peek = Style.Space.xxl              // lip of the next card at the bottom
+            let topGap = Style.Space.sm             // small space under the contributors row
+            let cardHeight = geo.size.height - peek - topGap
             ScrollView(.vertical) {
                 LazyVStack(spacing: Style.Space.sm) {
                     ForEach(magazine.cards) { cardViewModel in
@@ -54,9 +55,11 @@ struct CardFeedView: View {
                 }
                 .scrollTargetLayout()
             }
-            // viewAligned snaps to each card;
+            // viewAligned snaps to each card; asymmetric margins keep the first
+            // card close under the contributors row while still peeking the next.
             .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
-            .contentMargins(.vertical, peek, for: .scrollContent)
+            .contentMargins(.top, topGap, for: .scrollContent)
+            .contentMargins(.bottom, peek, for: .scrollContent)
             .scrollIndicators(.hidden)
         }
     }
@@ -74,7 +77,7 @@ private struct ContributorsRow: View {
         VStack(alignment: .leading, spacing: Style.Space.sm) {
             let contStr = contributors.count == 1 ? "CONTRIBUTOR" : "CONTRIBUTORS"
             Text("\(contributors.count) \(contStr)")
-                .font(Style.eyebrow).tracking(1.6)
+                .font(Style.eyebrow).tracking(1.0)
                 .foregroundStyle(Style.meta)
             ScrollView(.horizontal) {
                 HStack(spacing: Style.Space.md) {

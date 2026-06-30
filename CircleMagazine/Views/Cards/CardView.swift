@@ -22,7 +22,7 @@ struct CardView: View {
     private var content: some View {
         // ponytail: .first — video-only cards; switch on the full array if mixed cards appear
         switch viewModel.media.first {
-        case .video(let source): VideoCard(source: source, author: viewModel.author, caption: viewModel.caption)
+        case .video(let source): VideoCard(source: source, author: viewModel.author, caption: viewModel.caption, title: viewModel.title)
         default:                 standardCard   // image / fallback / empty
         }
     }
@@ -96,11 +96,14 @@ private struct PhotoMedia: View {
     }
 }
 
-// Full-bleed video card: video fills the whole card, author pinned to the bottom.
-private struct VideoCard: View {
+// Full-bleed video card: video fills the whole card, with the author chip pinned
+// top-left and the post's serif title bleeding over the bottom (v2 layout).
+// Internal (not private) so Compose can reuse it as the live "how it appears" preview.
+struct VideoCard: View {
     let source: VideoSource
     let author: User?
     let caption: String?
+    let title: String?
 
     var body: some View {
         ZStack {
@@ -110,24 +113,40 @@ private struct VideoCard: View {
             case .rawFile:         Color.black   // TODO wire up file playback
             }
 
-            Text("WATCH")
-                .font(.system(size: 9, weight: .semibold)).tracking(0.9)
-                .foregroundStyle(.white.opacity(0.92))
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 4))
-                .padding(12)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .allowsHitTesting(false)
+            // Dual scrim: darken top (author chip) and bottom (title), clear middle.
+            LinearGradient(stops: [
+                .init(color: .black.opacity(0.5),  location: 0.0),
+                .init(color: .clear,               location: 0.18),
+                .init(color: .clear,               location: 0.52),
+                .init(color: .black.opacity(0.32), location: 0.74),
+                .init(color: .black.opacity(0.82), location: 1.0),
+            ], startPoint: .top, endPoint: .bottom)
+            .allowsHitTesting(false)
 
             Image(systemName: "play.fill")
                 .font(.system(size: 22)).foregroundStyle(Style.ink)
-                .padding(20).background(SwiftUI.Circle().fill(.white.opacity(0.93)))
+                .padding(20).background(SwiftUI.Circle().fill(.white.opacity(0.94)))
                 .allowsHitTesting(false)   // let taps reach the thumbnail underneath
 
-            VStack(spacing: 0) {
-                handle
-                Spacer(minLength: 0)
-                if let author { authorRow(author) }
+            handle
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .allowsHitTesting(false)
+
+            if let author {
+                authorChip(author)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+            }
+
+            if let title {
+                Text(title)
+                    .font(.system(size: 21, weight: .bold, design: .serif))
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 18).padding(.bottom, 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .allowsHitTesting(false)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -136,30 +155,25 @@ private struct VideoCard: View {
     private var handle: some View {
         Capsule().fill(.white.opacity(0.6))
             .frame(width: 36, height: 4)
-            .frame(maxWidth: .infinity)
             .padding(.top, 10)
     }
 
-    private func authorRow(_ author: User) -> some View {
-        HStack(alignment: .top, spacing: 9) {
-            SwiftUI.Circle().fill(.white.opacity(0.22))
-                .frame(width: 36, height: 36)
+    // Author identity over the top of the media: avatar + name + caption subtitle.
+    private func authorChip(_ author: User) -> some View {
+        HStack(spacing: 9) {
+            SwiftUI.Circle().fill(.white.opacity(0.18))
+                .frame(width: 30, height: 30)
+                .overlay(SwiftUI.Circle().stroke(.white.opacity(0.45), lineWidth: 1))
                 .overlay(Text(author.username.prefix(1)).font(Style.byline).foregroundStyle(.white))
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(author.username).font(Style.byline).foregroundStyle(.white)
                 if let caption {
                     Text(caption)
-                        .font(Style.body).foregroundStyle(.white.opacity(0.85))
-                        .fixedSize(horizontal: false, vertical: true)
+                        .font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.82))
+                        .lineLimit(1)
                 }
             }
-            Spacer(minLength: 0)
         }
-        .padding(Style.Space.lg)
-        .padding(.top, Style.Space.xl)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LinearGradient(colors: [.clear, .black.opacity(0.78)],
-                                   startPoint: .top, endPoint: .bottom))
     }
 }
 

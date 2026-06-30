@@ -120,6 +120,7 @@ struct Page: Codable {
     let id: UUID
     let issueId: UUID?
     let submittedBy: UUID?
+    let title: String?        // optional editorial title, shown over the media
     let caption: String?      // optional, set by the author on submit
     let createdAt: Date?
 
@@ -127,6 +128,7 @@ struct Page: Codable {
         case id
         case issueId = "issue_id"
         case submittedBy = "submitted_by"
+        case title
         case caption
         case createdAt = "created_at"
     }
