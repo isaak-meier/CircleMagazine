@@ -50,33 +50,6 @@ enum CardMediaViewModel {
         }
     }
 }
-
-enum VideoSource {
-    case youtube(id: String)
-    case rawFile(URL)
-
-    init?(_ url: URL) {
-        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        let host = components?.host ?? ""
-
-        if host.contains("youtu.be") {
-                // Short share link: the id is the path, e.g. youtu.be/aB3xK9q
-            guard let id = url.pathComponents.last, url.pathComponents.count > 1, !id.isEmpty
-            else { return nil }
-            self = .youtube(id: id)
-        } else if host.contains("youtube.com") {
-                // Watch link — id is in ?v=… ; no id ⇒ bogus link, reject.
-            guard let id = components?.queryItems?.first(where: { $0.name == "v" })?.value,
-                  !id.isEmpty
-            else { return nil }
-            self = .youtube(id: id)
-        } else {
-                // Any other valid URL: treat as a directly playable file.
-            self = .rawFile(url)
-        }
-    }
-}
-
 enum CardMediaError: LocalizedError {
     case invalidURL
     var errorDescription: String? { "The url could not be parsed" }

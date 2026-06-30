@@ -60,6 +60,11 @@ extension Magazine {
             page: page(caption: "had to share this one"),
             pageMedia: [media("video", url: "https://www.youtube.com/watch?v=dslLBsHkVzE", 0)],
             author: jack)
+        let instaCard = MagazinePage(
+            page: page(title: "A Reel Worth Sharing",
+                       caption: "first reel on Circle 🎬"),
+            pageMedia: [media("video", url: "https://www.instagram.com/reels/DZ30GywAbc7/", 0)],
+            author: jack)
         let spread1 = MagazinePage(page: page(), pageMedia: [
             media("text", text: """
       You do not have to be good. You do not have to walk on your knees \
@@ -92,7 +97,7 @@ extension Magazine {
         ])
         return Magazine(
             issue: Issue(id: issueId, publishDate: "2026-06-22", isLive: true, createdAt: nil),
-            pages: [videoCard, videoCard2, spread1, spread2],
+            pages: [instaCard, videoCard, videoCard2, spread1, spread2],
         )
     }()
 }
