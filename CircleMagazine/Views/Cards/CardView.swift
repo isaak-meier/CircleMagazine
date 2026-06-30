@@ -22,9 +22,8 @@ struct CardView: View {
     private var content: some View {
         // ponytail: .first — video-only cards; switch on the full array if mixed cards appear
         switch viewModel.media.first {
-            case .video(let source): VideoCard(source)
-            case .image(let url): standardCard()
-            case .fallback(let error): standardCard()
+        case .video(let source): VideoCard(source: source, author: viewModel.author, caption: viewModel.caption)
+        default:                 standardCard   // image / fallback / empty
         }
     }
 
@@ -99,16 +98,36 @@ private struct PhotoMedia: View {
 
 // Full-bleed video card: video fills the whole card, author pinned to the bottom.
 private struct VideoCard: View {
+    let source: VideoSource
+    let author: User?
+    let caption: String?
 
     var body: some View {
         ZStack {
+            // Full-bleed media fills the card; chrome sits on top.
+            switch source {
+            case .youtube(let id): YouTubeThumbnail(id: id)
+            case .rawFile:         Color.black   // TODO wire up file playback
+            }
+
+            Text("WATCH")
+                .font(.system(size: 9, weight: .semibold)).tracking(0.9)
+                .foregroundStyle(.white.opacity(0.92))
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 4))
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .allowsHitTesting(false)
+
             Image(systemName: "play.fill")
                 .font(.system(size: 22)).foregroundStyle(Style.ink)
                 .padding(20).background(SwiftUI.Circle().fill(.white.opacity(0.93)))
+                .allowsHitTesting(false)   // let taps reach the thumbnail underneath
+
             VStack(spacing: 0) {
                 handle
                 Spacer(minLength: 0)
-                author
+                if let author { authorRow(author) }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -121,17 +140,18 @@ private struct VideoCard: View {
             .padding(.top, 10)
     }
 
-    // ponytail: hardcoded per request — swap for viewModel.author once the bio field exists.
-    private var author: some View {
+    private func authorRow(_ author: User) -> some View {
         HStack(alignment: .top, spacing: 9) {
             SwiftUI.Circle().fill(.white.opacity(0.22))
                 .frame(width: 36, height: 36)
-                .overlay(Text("P").font(Style.byline).foregroundStyle(.white))
+                .overlay(Text(author.username.prefix(1)).font(Style.byline).foregroundStyle(.white))
             VStack(alignment: .leading, spacing: 2) {
-                Text("Philly Bum Bum").font(Style.byline).foregroundStyle(.white)
-                Text("Bum about town. Hoagie purist. I film the city while it sleeps.")
-                    .font(Style.body).foregroundStyle(.white.opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(author.username).font(Style.byline).foregroundStyle(.white)
+                if let caption {
+                    Text(caption)
+                        .font(Style.body).foregroundStyle(.white.opacity(0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -140,6 +160,44 @@ private struct VideoCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(LinearGradient(colors: [.clear, .black.opacity(0.78)],
                                    startPoint: .top, endPoint: .bottom))
+    }
+}
+
+// YouTube thumbnail that opens the video externally on tap — no in-app playback.
+// Thumbnail URL is predictable from the id, so no API call needed.
+private struct YouTubeThumbnail: View {
+    let id: String
+    @Environment(\.openURL) private var openURL
+    // maxresdefault is 16:9 and sharp but 404s for some videos; hqdefault always
+    // exists (4:3 with letterbox bars). Try maxres, fall back to hq on failure.
+    @State private var useFallback = false
+
+    private var thumbnailURL: URL? {
+        let quality = useFallback ? "hqdefault" : "maxresdefault"
+        return URL(string: "https://img.youtube.com/vi/\(id)/\(quality).jpg")
+    }
+
+    var body: some View {
+        // Color.black defines the frame; the image overlays and is clipped to it,
+        // so scaledToFill can't push past the card bounds.
+        Color.black
+            .overlay {
+                AsyncImage(url: thumbnailURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure where !useFallback:
+                        Color.clear.onAppear { useFallback = true }   // retry with hqdefault
+                    default:
+                        Color.clear
+                    }
+                }
+            }
+            .clipped()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if let url = URL(string: "https://www.youtube.com/watch?v=\(id)") { openURL(url) }
+            }
     }
 }
 

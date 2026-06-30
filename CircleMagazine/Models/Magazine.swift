@@ -17,6 +17,12 @@ struct Magazine {
             CardViewModel(from: page)
         }
     }
+
+    /// Distinct authors who contributed a page to this issue, in first-appearance order.
+    var contributors: [User] {
+        var seen = Set<UUID>()
+        return pages.compactMap(\.author).filter { seen.insert($0.id).inserted }
+    }
 }
 
 struct MagazinePage {
@@ -29,14 +35,29 @@ extension Magazine {
         /// Sample issue for previews — a cover plus two mixed widget spreads.
     static let sample: Magazine = {
         let issueId = UUID()
-        func page() -> Page { Page(id: UUID(), issueId: issueId, submittedBy: nil, createdAt: nil) }
+        func page(caption: String? = nil) -> Page {
+            Page(id: UUID(), issueId: issueId, submittedBy: nil, caption: caption, createdAt: nil)
+        }
         func media(_ type: String, url: String? = nil, text: String? = nil, _ pos: Int) -> PageMedia {
             PageMedia(id: UUID(), pageId: nil, mediaUrl: url, mediaType: type,
                       textContent: text, position: pos, createdAt: nil)
         }
-        let cover = MagazinePage(page: page(), pageMedia: [
-            media("image", url: "https://picsum.photos/seed/cover/800/1200", 0)
-        ])
+        let philly = User(
+            id: UUID(), username: "Philly Bum Bum", bio: nil,
+            avatarUrl: nil, role: nil, followCredits: nil, circleSlots: nil,
+            isVerified: nil, createdAt: nil)
+        let videoCard = MagazinePage(
+            page: page(caption: "This shit is SO DOPE!!"),
+            pageMedia: [media("video", url: "https://www.youtube.com/watch?v=62bIsvRcPv0", 0)],
+            author: philly)
+        let jack = User(
+            id: UUID(), username: "jmoney", bio: nil,
+            avatarUrl: nil, role: nil, followCredits: nil, circleSlots: nil,
+            isVerified: nil, createdAt: nil)
+        let videoCard2 = MagazinePage(
+            page: page(caption: "had to share this one"),
+            pageMedia: [media("video", url: "https://www.youtube.com/watch?v=dslLBsHkVzE", 0)],
+            author: jack)
         let spread1 = MagazinePage(page: page(), pageMedia: [
             media("text", text: """
       You do not have to be good. You do not have to walk on your knees \
@@ -69,7 +90,7 @@ extension Magazine {
         ])
         return Magazine(
             issue: Issue(id: issueId, publishDate: "2026-06-22", isLive: true, createdAt: nil),
-            pages: [cover, spread1, spread2]
+            pages: [videoCard, videoCard2, spread1, spread2],
         )
     }()
 }

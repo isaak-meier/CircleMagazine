@@ -120,12 +120,14 @@ struct Page: Codable {
     let id: UUID
     let issueId: UUID?
     let submittedBy: UUID?
+    let caption: String?      // optional, set by the author on submit
     let createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
         case issueId = "issue_id"
         case submittedBy = "submitted_by"
+        case caption
         case createdAt = "created_at"
     }
 }
@@ -133,6 +135,7 @@ struct Page: Codable {
 struct User: Codable {
     let id: UUID
     let username: String
+    let bio: String?
     let avatarUrl: String?
     let role: String?
     let followCredits: Int?
@@ -143,6 +146,7 @@ struct User: Codable {
     enum CodingKeys: String, CodingKey {
         case id
         case username
+        case bio
         case avatarUrl = "avatar_url"
         case role
         case followCredits = "follow_credits"

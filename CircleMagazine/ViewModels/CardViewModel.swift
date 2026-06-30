@@ -11,10 +11,12 @@ struct CardViewModel: Identifiable {
     let id: UUID
     let media: [CardMediaViewModel]     // the page's media, in position order
     let author: User?
+    let caption: String?
 
     init(from page: MagazinePage) {
         self.id = page.page.id
         self.author = page.author
+        self.caption = page.page.caption
         self.media = page.pageMedia
             .sorted { ($0.position ?? 0) < ($1.position ?? 0) }
             .map(CardMediaViewModel.init)
@@ -48,7 +50,7 @@ enum CardMediaViewModel {
 }
 
 enum VideoSource {
-    case youtubeEmbed(id: String)
+    case youtube(id: String)
     case rawFile(URL)
 
     init?(_ url: URL) {
@@ -60,7 +62,7 @@ enum VideoSource {
             guard let id = components?.queryItems?.first(where: { $0.name == "v" })?.value,
                   !id.isEmpty
             else { return nil }
-            self = .youtubeEmbed(id: id)
+            self = .youtube(id: id)
         } else {
                 // Any other valid URL: treat as a directly playable file.
             self = .rawFile(url)
