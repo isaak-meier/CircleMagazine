@@ -17,7 +17,7 @@ final class ComposeModel {
 
     struct Resolved {
         let videoURL: URL
-        let id: String
+        let source: VideoSource
         let title: String?
     }
 
@@ -41,19 +41,27 @@ final class ComposeModel {
 
     var canPost: Bool { resolved != nil && issueId != nil && phase == .editing }
 
-    /// Parse the pasted link and pull the YouTube title for the live preview.
+    /// Parse the pasted link and, for YouTube, pull the title for the live preview.
     func resolve() async {
         let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed), case .youtube(let id)? = VideoSource(url) else {
+        guard let url = URL(string: trimmed), let source = VideoSource(url), !isRawFile(source) else {
             resolved = nil
-            errorText = "That doesn't look like a YouTube link."
+            errorText = "Paste a YouTube or Instagram link."
             return
         }
         errorText = nil
         isResolving = true
-        let title = await YouTubeOEmbed.title(forVideoID: id)
-        resolved = Resolved(videoURL: url, id: id, title: title)
+        var title: String?
+        if case .youtube(let id) = source {
+            title = await YouTubeOEmbed.title(forVideoID: id)   // Instagram has no keyless title lookup.
+        }
+        resolved = Resolved(videoURL: url, source: source, title: title)
         isResolving = false
+    }
+
+    private func isRawFile(_ source: VideoSource) -> Bool {
+        if case .rawFile = source { return true }
+        return false
     }
 
     func clearLink() {
@@ -161,14 +169,14 @@ struct ComposeView: View {
     private var pasteStep: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Share a video").font(.system(size: 23, weight: .bold, design: .serif))
-            Text("Paste a YouTube link to feature it in this Sunday's edition.")
+            Text("Paste a YouTube or Instagram link to feature it in this Sunday's edition.")
                 .font(Style.body).foregroundStyle(Style.meta).padding(.top, 7)
 
             typePills.padding(.vertical, 18)
 
             HStack(spacing: 11) {
                 Image(systemName: "link").font(.system(size: 15)).foregroundStyle(Color(hex: 0xB4AFA8))
-                TextField("Paste a YouTube link", text: $model.linkText)
+                TextField("Paste a YouTube or Instagram link", text: $model.linkText)
                     .font(.system(size: 13.5))
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .keyboardType(.URL)
@@ -259,7 +267,7 @@ struct ComposeView: View {
                 linkedChip(resolved)
 
                 sectionLabel("How it appears in the edition").padding(.top, 18).padding(.bottom, 11)
-                VideoCard(source: .youtube(id: resolved.id), author: model.author,
+                VideoCard(source: resolved.source, author: model.author,
                           caption: model.caption.isEmpty ? nil : model.caption,
                           title: resolved.title, captionStyle: model.captionStyle)
                     .frame(height: 246)
@@ -292,8 +300,11 @@ struct ComposeView: View {
 
     private func linkedChip(_ resolved: ComposeModel.Resolved) -> some View {
         HStack(spacing: 11) {
-            Image(systemName: "play.rectangle.fill")
-                .font(.system(size: 18)).foregroundStyle(.red)
+            if case .insta = resolved.source {
+                Image(systemName: "camera.fill").font(.system(size: 16)).foregroundStyle(.pink)
+            } else {
+                Image(systemName: "play.rectangle.fill").font(.system(size: 18)).foregroundStyle(.red)
+            }
             Text(resolved.title ?? resolved.videoURL.absoluteString)
                 .font(.system(size: 13, weight: .medium)).foregroundStyle(Style.ink)
                 .lineLimit(1)
@@ -342,9 +353,7 @@ struct ComposeView: View {
 
     private func scheduledRow(_ resolved: ComposeModel.Resolved) -> some View {
         HStack(spacing: 11) {
-            AsyncImage(url: URL(string: "https://img.youtube.com/vi/\(resolved.id)/hqdefault.jpg")) {
-                $0.resizable().scaledToFill()
-            } placeholder: { Color.black }
+            scheduledThumbnail(resolved.source)
                 .frame(width: 60, height: 40).clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 7))
                 .overlay(Image(systemName: "play.fill").font(.system(size: 8)).foregroundStyle(Style.ink)
@@ -361,6 +370,21 @@ struct ComposeView: View {
         .padding(.horizontal, 12).padding(.vertical, 9)
         .background(.white, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Style.rule, lineWidth: 1))
+    }
+
+    // YouTube has a keyless thumbnail URL; Instagram doesn't, so fall back to the
+    // same gradient the card shows for insta.
+    @ViewBuilder
+    private func scheduledThumbnail(_ source: VideoSource) -> some View {
+        switch source {
+        case .youtube(let id):
+            AsyncImage(url: URL(string: "https://img.youtube.com/vi/\(id)/hqdefault.jpg")) {
+                $0.resizable().scaledToFill()
+            } placeholder: { Color.black }
+        default:
+            LinearGradient(colors: [.purple, .orange, .pink],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
     }
 
     // MARK: Bits
