@@ -23,6 +23,7 @@ final class ComposeModel {
 
     var linkText = ""
     var caption = ""
+    var captionStyle: CaptionStyle = .paperPlate
     private(set) var resolved: Resolved?
     private(set) var isResolving = false
     private(set) var phase: Phase = .editing
@@ -72,7 +73,8 @@ final class ComposeModel {
             try await db.createVideoPost(
                 issueId: issueId, authorId: author.id,
                 videoURL: resolved.videoURL,
-                caption: caption.isEmpty ? nil : caption)
+                caption: caption.isEmpty ? nil : caption,
+                captionStyle: captionStyle)
             phase = .posted
         } catch {
             errorText = "Couldn't post your video — \(error.localizedDescription)"
@@ -226,6 +228,24 @@ struct ComposeView: View {
         }
     }
 
+    // Four caption treatments (1a–1d). Tap re-renders the preview above.
+    private var stylePicker: some View {
+        HStack(spacing: 8) {
+            ForEach(CaptionStyle.allCases) { style in
+                let selected = model.captionStyle == style
+                Button { model.captionStyle = style } label: {
+                    Text(style.displayName)
+                        .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? Style.paper : Color(hex: 0xA8A39C))
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background { if selected { Capsule().fill(Style.ink) } }
+                        .overlay { if !selected { Capsule().stroke(Style.rule, lineWidth: 1) } }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     // MARK: Step 2 — preview + note
 
     @ViewBuilder
@@ -241,11 +261,14 @@ struct ComposeView: View {
                 sectionLabel("How it appears in the edition").padding(.top, 18).padding(.bottom, 11)
                 VideoCard(source: .youtube(id: resolved.id), author: model.author,
                           caption: model.caption.isEmpty ? nil : model.caption,
-                          title: resolved.title)
+                          title: resolved.title, captionStyle: model.captionStyle)
                     .frame(height: 246)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .shadow(color: .black.opacity(0.12), radius: 9, y: 3)
                     .allowsHitTesting(false)
+
+                sectionLabel("Caption style").padding(.top, 22).padding(.bottom, 11)
+                stylePicker
 
                 sectionLabel("Your note").padding(.top, 22).padding(.bottom, 12)
                 HStack(alignment: .top, spacing: 11) {

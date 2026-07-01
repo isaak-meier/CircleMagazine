@@ -96,13 +96,15 @@ final class DatabaseService {
   /// any per-render network calls. Title lookup is best-effort — a failure just
   /// leaves the title nil rather than blocking the post.
   @discardableResult
-  func createVideoPost(issueId: UUID, authorId: UUID, videoURL: URL, caption: String?) async throws -> Page {
+  func createVideoPost(issueId: UUID, authorId: UUID, videoURL: URL, caption: String?,
+                       captionStyle: CaptionStyle) async throws -> Page {
     var title: String?
     if case .youtube(let id)? = VideoSource(videoURL) {
       title = await YouTubeOEmbed.title(forVideoID: id)
     }
     let page: Page = try await supabase.from("pages")
-      .insert(PageInsert(issueId: issueId, submittedBy: authorId, title: title, caption: caption))
+      .insert(PageInsert(issueId: issueId, submittedBy: authorId, title: title,
+                         caption: caption, captionStyle: captionStyle))
       .select().single().execute().value
     try await supabase.from("page_media")
       .insert(PageMediaInsert(pageId: page.id, mediaUrl: videoURL.absoluteString,

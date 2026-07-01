@@ -122,6 +122,7 @@ struct Page: Codable {
     let submittedBy: UUID?
     let title: String?        // optional editorial title, shown over the media
     let caption: String?      // optional, set by the author on submit
+    var captionStyle: CaptionStyle? = nil  // how the title bar is treated; nil ⇒ default
     let createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
@@ -130,6 +131,7 @@ struct Page: Codable {
         case submittedBy = "submitted_by"
         case title
         case caption
+        case captionStyle = "caption_style"
         case createdAt = "created_at"
     }
 }

@@ -10,12 +10,14 @@ struct PageInsert: Encodable {
     let submittedBy: UUID?
     let title: String?
     let caption: String?
+    let captionStyle: CaptionStyle
 
     enum CodingKeys: String, CodingKey {
         case issueId = "issue_id"
         case submittedBy = "submitted_by"
         case title
         case caption
+        case captionStyle = "caption_style"
     }
 }
 

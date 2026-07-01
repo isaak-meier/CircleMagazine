@@ -15,25 +15,60 @@ struct VideoCard: View {
     let author: User?
     let caption: String?
     let title: String?
+    var captionStyle: CaptionStyle = .paperPlate
+
+    // The line the plate/overlay sets in serif. Falls back to the note when a
+    // video has no fetched title; nil ⇒ no plate at all (just the media).
+    private var displayTitle: String? {
+        let t = title ?? caption
+        return (t?.isEmpty ?? true) ? nil : t
+    }
 
     var body: some View {
-        ZStack {
-                // Full-bleed media fills the card; chrome sits on top.
-            switch source {
-                case .youtube(let id): YouTubeThumbnail(id: id)
-                case .insta(let id, let kind):   InstaEmbed(id: id, kind: kind)
-                case .rawFile:         Color.black   // TODO wire up file playback
+        Group {
+            switch captionStyle {
+            case .immersive: immersiveCard
+            default:         platedCard   // paperPlate / inkBand / newsprintKicker
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 
-                // Dual scrim: darken top (author chip) and bottom (title), clear middle.
-            LinearGradient(stops: [
-                .init(color: .black.opacity(0.5),  location: 0.0),
-                .init(color: .clear,               location: 0.18),
-                .init(color: .clear,               location: 0.52),
-                .init(color: .black.opacity(0.32), location: 0.74),
-                .init(color: .black.opacity(0.82), location: 1.0),
-            ], startPoint: .top, endPoint: .bottom)
-            .allowsHitTesting(false)
+    // MARK: Layouts
+
+    // 1a / 1c / 1d — fixed-height media on top, a caption plate underneath.
+    private var platedCard: some View {
+        VStack(spacing: 0) {
+            mediaRegion(scrim: topScrim)
+            if displayTitle != nil { plate }
+        }
+    }
+
+    // 1b — full-bleed media with the title floating over the bottom.
+    private var immersiveCard: some View {
+        mediaRegion(scrim: immersiveScrim) {
+            if let displayTitle {
+                VStack(alignment: .leading, spacing: 9) {
+                    kicker(markSize: 18, color: .white.opacity(0.85))
+                    Text(displayTitle)
+                        .font(.system(size: 20, weight: .bold, design: .serif))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 18).padding(.bottom, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .allowsHitTesting(false)
+            }
+        }
+    }
+
+    // MARK: Media region (shared)
+
+    private func mediaRegion(scrim: some View,
+                             @ViewBuilder overlay: () -> some View = { EmptyView() }) -> some View {
+        ZStack {
+            media
+            scrim.allowsHitTesting(false)
 
             Image(systemName: "play.fill")
                 .font(.system(size: 22)).foregroundStyle(Style.ink)
@@ -51,18 +86,99 @@ struct VideoCard: View {
                     .allowsHitTesting(false)
             }
 
-            if let title {
-                Text(title)
-                    .font(.system(size: 21, weight: .bold, design: .serif))
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 18).padding(.bottom, 16)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .allowsHitTesting(false)
-            }
+            overlay()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
     }
+
+    @ViewBuilder
+    private var media: some View {
+        switch source {
+        case .youtube(let id):         YouTubeThumbnail(id: id)
+        case .insta(let id, let kind): InstaEmbed(id: id, kind: kind)
+        case .rawFile:                 Color.black   // TODO wire up file playback
+        }
+    }
+
+    // Darken just the top so the author chip reads; the plate carries the title.
+    private var topScrim: some View {
+        LinearGradient(stops: [
+            .init(color: .black.opacity(0.5),  location: 0.0),
+            .init(color: .black.opacity(0.18), location: 0.22),
+            .init(color: .clear,               location: 0.42),
+        ], startPoint: .top, endPoint: .bottom)
+    }
+
+    // Bottom-heavy scrim for the full-bleed title (1b).
+    private var immersiveScrim: some View {
+        LinearGradient(stops: [
+            .init(color: .black.opacity(0.5),  location: 0.0),
+            .init(color: .clear,               location: 0.20),
+            .init(color: .clear,               location: 0.52),
+            .init(color: .black.opacity(0.3),  location: 0.72),
+            .init(color: .black.opacity(0.85), location: 1.0),
+        ], startPoint: .top, endPoint: .bottom)
+    }
+
+    // MARK: Plates
+
+    @ViewBuilder
+    private var plate: some View {
+        switch captionStyle {
+        case .inkBand:         inkBandPlate
+        case .newsprintKicker: newsprintPlate
+        default:               paperPlate
+        }
+    }
+
+    // 1a — cream plate, black top rule, source mark + serif title.
+    private var paperPlate: some View {
+        HStack(spacing: 12) {
+            sourceMark(size: 26)
+            plateTitle(color: Style.ink)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Style.paper)
+        .overlay(alignment: .top) { Rectangle().fill(Style.ink).frame(height: 2) }
+    }
+
+    // 1c — navy plate, mono kicker, cream serif title.
+    private var inkBandPlate: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            kicker(markSize: 17, color: Color(hex: 0x9A9AC0))
+            plateTitle(color: Style.paper)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 16)
+        .background(Style.edition)
+    }
+
+    // 1d — cream plate, red rule, "VIDEO · author" mono kicker over serif title.
+    private var newsprintPlate: some View {
+        HStack(spacing: 13) {
+            RoundedRectangle(cornerRadius: 2).fill(Color(hex: 0xFF0000)).frame(width: 3)
+            VStack(alignment: .leading, spacing: 7) {
+                monoKicker("Video · \(author?.username ?? "Circle")", color: Style.meta)
+                plateTitle(color: Style.ink)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 16)
+        .background(Style.paper)
+    }
+
+    private func plateTitle(color: Color) -> some View {
+        Text(displayTitle ?? "")
+            .font(.system(size: 18, weight: .bold, design: .serif))
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: Bits
 
     private var handle: some View {
         Capsule().fill(.white.opacity(0.6))
@@ -70,7 +186,7 @@ struct VideoCard: View {
             .padding(.top, 10)
     }
 
-        // Author identity over the top of the media: avatar + name + caption subtitle.
+    // Author identity over the top of the media: avatar + name + caption subtitle.
     private func authorChip(_ author: User) -> some View {
         HStack(spacing: 9) {
             SwiftUI.Circle().fill(.white.opacity(0.18))
@@ -85,6 +201,35 @@ struct VideoCard: View {
                         .lineLimit(1)
                 }
             }
+        }
+    }
+
+    // A "▶ WATCH" mono line, used by 1b/1c. ponytail: no duration — oEmbed
+    // doesn't return it, so we show the verb without a runtime.
+    private func kicker(markSize: CGFloat, color: Color) -> some View {
+        HStack(spacing: 8) {
+            sourceMark(size: markSize)
+            Text("Watch".uppercased())
+                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                .tracking(1.6).foregroundStyle(color)
+        }
+    }
+
+    private func monoKicker(_ text: String, color: Color) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+            .tracking(1.6).foregroundStyle(color)
+    }
+
+    // Red YouTube glyph for YouTube posts; nothing for other sources.
+    @ViewBuilder
+    private func sourceMark(size: CGFloat) -> some View {
+        if case .youtube = source {
+            RoundedRectangle(cornerRadius: size * 0.18)
+                .fill(Color(hex: 0xFF0000))
+                .frame(width: size, height: size * 0.7)
+                .overlay(Image(systemName: "play.fill")
+                    .font(.system(size: size * 0.34)).foregroundStyle(.white))
         }
     }
 }

@@ -13,12 +13,14 @@ struct CardViewModel: Identifiable {
     let author: User?
     let title: String?
     let caption: String?
+    let captionStyle: CaptionStyle
 
     init(from page: MagazinePage) {
         self.id = page.page.id
         self.author = page.author
         self.title = page.page.title
         self.caption = page.page.caption
+        self.captionStyle = page.page.captionStyle ?? .paperPlate
         self.media = page.pageMedia
             .sorted { ($0.position ?? 0) < ($1.position ?? 0) }
             .map(CardMediaViewModel.init)
