@@ -95,7 +95,7 @@ struct VideoCard: View {
     @ViewBuilder
     private var media: some View {
         switch source {
-        case .youtube(let id):         YouTubeThumbnail(id: id)
+        case .youtube(let id):         YouTubeEmbed(id: id)   // was YouTubeThumbnail — one-identifier swap back
         case .insta(let id, let kind): InstaEmbed(id: id, kind: kind)
         case .rawFile:                 Color.black   // TODO wire up file playback
         }
@@ -273,6 +273,31 @@ private struct YouTubeThumbnail: View {
     }
 }
 
+// Plays the video inline via YouTube's embed in a WKWebView. Same (id:) signature
+// as YouTubeThumbnail, so switching the two on the VideoCard switch line is a
+// one-identifier change. Old thumbnail-only behavior kept above.
+private struct YouTubeEmbed: View {
+    let id: String
+
+    // Loading the embed URL directly gives YouTube a null/opaque origin and it
+    // throws "player configuration error". Wrapping the iframe in our own HTML
+    // and loading it with a real baseURL supplies the origin the player needs.
+    private var html: String {
+        """
+        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>html,body{margin:0;background:#000;height:100%}iframe{border:0;width:100%;height:100%;position:absolute}</style>
+        </head><body>
+        <iframe src="https://www.youtube.com/embed/\(id)?playsinline=1&origin=https://circlemagazine.app"
+                allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+        </body></html>
+        """
+    }
+
+    var body: some View {
+        WebEmbedView(html: html, baseURL: URL(string: "https://circlemagazine.app"))
+    }
+}
+
 private struct InstaThumbnail: View {
     let id: String
     let kind: InstagramContentType
@@ -306,25 +331,42 @@ private struct InstaEmbed: View {
 
     var body: some View {
         if let embedURL {
-            InstaWebView(url: embedURL)
+            WebEmbedView(url: embedURL)
         } else {
             Color.black
         }
     }
 }
 
-private struct InstaWebView: UIViewRepresentable {
-    let url: URL
+private struct WebEmbedView: UIViewRepresentable {
+    enum Content {
+        case url(URL)
+        case html(String, baseURL: URL?)
+    }
+    let content: Content
+
+    init(url: URL) { content = .url(url) }
+    init(html: String, baseURL: URL?) { content = .html(html, baseURL: baseURL) }
 
     func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView()
+        // Inline playback config is required or YouTube demands fullscreen and
+        // taps do nothing; matches how the iframe embed expects to run.
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        let webView = WKWebView(frame: .zero, configuration: config)
         webView.scrollView.isScrollEnabled = false
         webView.isOpaque = false
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        webView.load(URLRequest(url: url))
+        switch content {
+        case .url(let url):
+            webView.load(URLRequest(url: url))
+        case .html(let html, let baseURL):
+            webView.loadHTMLString(html, baseURL: baseURL)
+        }
     }
 }
 
