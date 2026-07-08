@@ -22,7 +22,7 @@ struct CardView: View {
     private var content: some View {
         // ponytail: .first — video-only cards; switch on the full array if mixed cards appear
         switch viewModel.media.first {
-        case .video(let source): VideoCard(source: source, author: viewModel.author, caption: viewModel.caption, title: viewModel.title, captionStyle: viewModel.captionStyle)
+        case .video(let source): VideoCard(source: source, author: viewModel.author, caption: viewModel.caption, title: viewModel.title, captionStyle: viewModel.captionStyle, cardShape: viewModel.cardShape)
         default:                 standardCard   // image / fallback / empty
         }
     }

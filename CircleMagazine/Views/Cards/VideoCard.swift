@@ -7,15 +7,16 @@
 
 import SwiftUI
 import WebKit
-// Full-bleed video card: video fills the whole card, with the author chip pinned
-// top-left and the post's serif title bleeding over the bottom (v2 layout).
-// Internal (not private) so Compose can reuse it as the live "how it appears" preview.
+// Video card: media sized by CardShape (full-bleed for tall, top-pinned for
+// wide/square), author chip top-left, title treatment driven by CaptionStyle.
+// Rendered only via CardView — Compose previews through CardView too.
 struct VideoCard: View {
     let source: VideoSource
     let author: User?
     let caption: String?
     let title: String?
     var captionStyle: CaptionStyle = .paperPlate
+    var cardShape: CardShape = .tall
 
     // The line the plate/overlay sets in serif. Falls back to the note when a
     // video has no fetched title; nil ⇒ no plate at all (just the media).
@@ -31,7 +32,9 @@ struct VideoCard: View {
             default:         platedCard   // paperPlate / inkBand / newsprintKicker
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // .top pins wide/square media (+ plate) to the card top; the leftover
+        // card area below shows the card's paper background. Tall fills anyway.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: Layouts
@@ -88,8 +91,23 @@ struct VideoCard: View {
 
             overlay()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .modifier(ShapeFrame(shape: cardShape))
         .clipped()
+    }
+
+    // Tall fills the card (as before the shape axis existed); wide/square lock
+    // the media region to a fixed aspect ratio.
+    private struct ShapeFrame: ViewModifier {
+        let shape: CardShape
+        func body(content: Content) -> some View {
+            switch shape {
+            case .tall:
+                content.frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .wide, .square:
+                content.aspectRatio(shape.ratio, contentMode: .fit)
+                       .frame(maxWidth: .infinity)
+            }
+        }
     }
 
     @ViewBuilder

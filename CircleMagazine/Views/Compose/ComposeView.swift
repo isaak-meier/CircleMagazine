@@ -19,6 +19,7 @@ final class ComposeModel {
         let videoURL: URL
         let source: VideoSource
         let title: String?
+        let shape: CardShape
     }
 
     var linkText = ""
@@ -55,7 +56,8 @@ final class ComposeModel {
         if case .youtube(let id) = source {
             title = await YouTubeOEmbed.title(forVideoID: id)   // Instagram has no keyless title lookup.
         }
-        resolved = Resolved(videoURL: url, source: source, title: title)
+        resolved = Resolved(videoURL: url, source: source, title: title,
+                            shape: CardShape(mediaURL: url))
         isResolving = false
     }
 
@@ -82,7 +84,7 @@ final class ComposeModel {
                 issueId: issueId, authorId: author.id,
                 videoURL: resolved.videoURL,
                 caption: caption.isEmpty ? nil : caption,
-                captionStyle: captionStyle)
+                captionStyle: captionStyle, cardShape: resolved.shape)
             phase = .posted
         } catch {
             errorText = "Couldn't post your video — \(error.localizedDescription)"
@@ -96,9 +98,14 @@ struct ComposeView: View {
     @Environment(\.dismiss) private var dismiss
     /// Called when the post lands, so the feed can refresh to include it.
     let onPosted: () async -> Void
+    /// The feed's measured card size, so the preview is the card at its real
+    /// size. nil (feed not laid out yet) leaves the preview unconstrained.
+    let previewCardSize: CGSize?
 
-    init(db: DatabaseService, issueId: UUID?, author: User, onPosted: @escaping () async -> Void) {
+    init(db: DatabaseService, issueId: UUID?, author: User, previewCardSize: CGSize? = nil,
+         onPosted: @escaping () async -> Void) {
         _model = State(initialValue: ComposeModel(db: db, issueId: issueId, author: author))
+        self.previewCardSize = previewCardSize
         self.onPosted = onPosted
     }
 
@@ -267,12 +274,15 @@ struct ComposeView: View {
                 linkedChip(resolved)
 
                 sectionLabel("How it appears in the edition").padding(.top, 18).padding(.bottom, 11)
-                VideoCard(source: resolved.source, author: model.author,
-                          caption: model.caption.isEmpty ? nil : model.caption,
-                          title: resolved.title, captionStyle: model.captionStyle)
-                    .frame(height: 246)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .shadow(color: .black.opacity(0.12), radius: 9, y: 3)
+                // The exact card the feed renders (CardView owns the paper,
+                // corner radius, and shadow), so the preview can't drift.
+                CardView(viewModel: CardViewModel(
+                    previewing: resolved.source, author: model.author,
+                    title: resolved.title,
+                    caption: model.caption.isEmpty ? nil : model.caption,
+                    captionStyle: model.captionStyle, cardShape: resolved.shape))
+                    .frame(width: previewCardSize?.width, height: previewCardSize?.height)
+                    .frame(maxWidth: .infinity)   // feed-width card centered in compose's narrower column
                     .allowsHitTesting(false)
 
                 sectionLabel("Caption style").padding(.top, 22).padding(.bottom, 11)

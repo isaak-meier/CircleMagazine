@@ -11,6 +11,7 @@ struct PageInsert: Encodable {
     let title: String?
     let caption: String?
     let captionStyle: CaptionStyle
+    let cardShape: CardShape
 
     enum CodingKeys: String, CodingKey {
         case issueId = "issue_id"
@@ -18,6 +19,7 @@ struct PageInsert: Encodable {
         case title
         case caption
         case captionStyle = "caption_style"
+        case cardShape = "card_shape"
     }
 }
 

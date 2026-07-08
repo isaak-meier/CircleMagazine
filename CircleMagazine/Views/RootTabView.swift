@@ -14,21 +14,55 @@ struct RootTabView: View {
     let account: AccountManager
     @State private var tab: Tab = .feed
     @State private var composing = false
+    @State private var feedCardSize: CGSize?
 
-    enum Tab { case feed, account }
+    /// A circle being entered from the Circles tab: the chat sits beneath the
+    /// tab UI while the splash-style ripple reveals it from the tap point.
+    struct EnteredCircle {
+        let summary: CircleSummary
+        let tone: CircleBubbleLayout.BubbleTone
+        let origin: CGPoint
+    }
+    @State private var entered: EnteredCircle?
+    @State private var chatRevealed = false
+
+    enum Tab { case feed, circles, account }
 
     var body: some View {
+        ZStack {
+            if let entered, case .signedIn(let user) = account.authState {
+                CircleChatView(summary: entered.summary, tone: entered.tone, me: user) {
+                    self.entered = nil
+                    chatRevealed = false
+                }
+            }
+            // Kept in the hierarchy (hidden, not removed) so tab state like
+            // the feed's scroll position survives a trip into a chat.
+            tabsAndNavBar
+                .opacity(chatRevealed ? 0 : 1)
+                .allowsHitTesting(!chatRevealed)
+                .rippleReveal(origin: entered?.origin) { chatRevealed = true }
+        }
+        .coordinateSpace(name: "root")
+        .sheet(isPresented: $composing) { composeSheet }
+    }
+
+    private var tabsAndNavBar: some View {
         VStack(spacing: 0) {
             ZStack {
-                CardFeedView(issueLoader: issueLoader)
+                CardFeedView(issueLoader: issueLoader, cardSize: $feedCardSize)
                     .opacity(tab == .feed ? 1 : 0).allowsHitTesting(tab == .feed)
+                CirclesView(db: issueLoader.db, account: account,
+                            active: tab == .circles && entered == nil) { summary, tone, origin in
+                    entered = EnteredCircle(summary: summary, tone: tone, origin: origin)
+                }
+                    .opacity(tab == .circles ? 1 : 0).allowsHitTesting(tab == .circles)
                 AccountView(account: account)
                     .opacity(tab == .account ? 1 : 0).allowsHitTesting(tab == .account)
             }
             navBar
         }
         .background(Style.chrome)
-        .sheet(isPresented: $composing) { composeSheet }
     }
 
     // Compose needs the signed-in author and the live issue id; both come from
@@ -39,7 +73,8 @@ struct RootTabView: View {
     private var composeSheet: some View {
         switch account.authState {
         case .signedIn(let user):
-            ComposeView(db: issueLoader.db, issueId: liveIssueId, author: user) {
+            ComposeView(db: issueLoader.db, issueId: liveIssueId, author: user,
+                        previewCardSize: feedCardSize) {
                 tab = .feed
                 await issueLoader.refresh()
             }
@@ -77,7 +112,7 @@ struct RootTabView: View {
     private var navBar: some View {
         HStack {
             Button { tab = .feed } label: { navIcon("house.fill", active: tab == .feed) }
-            navIcon("magnifyingglass")
+            Button { tab = .circles } label: { navIcon("circle.circle", active: tab == .circles) }
             Button { composing = true } label: { compose }
             navIcon("bell")
             Button { tab = .account } label: { navIcon("person", active: tab == .account) }

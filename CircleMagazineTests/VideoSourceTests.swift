@@ -70,6 +70,21 @@ struct VideoSourceTests {
         #expect(source("https://youtube.com/watch?v=") == nil)
     }
 
+    // MARK: youtube.com shorts links
+
+    @Test func youtubeShorts() {
+        #expect(source("https://www.youtube.com/shorts/aB3xK9q") == .youtube(id: "aB3xK9q"))
+    }
+
+    @Test func youtubeShortsWithQuery() {
+        #expect(source("https://youtube.com/shorts/aB3xK9q?feature=share") == .youtube(id: "aB3xK9q"))
+    }
+
+    @Test func youtubeShortsMarkerButNoID() {
+        // "shorts" is the last component -> index+1 out of range -> reject.
+        #expect(source("https://youtube.com/shorts/") == nil)
+    }
+
     // MARK: instagram links -- id + content-type kind
 
     @Test func instaReel() {

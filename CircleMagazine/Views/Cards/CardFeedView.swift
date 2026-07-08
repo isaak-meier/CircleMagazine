@@ -11,10 +11,12 @@ import SwiftUI
 
 struct CardFeedView: View {
     let issueLoader: IssueLoader
+    /// Reports the measured card size up so Compose can preview at feed size.
+    @Binding var cardSize: CGSize?
 
     var body: some View {
         VStack(spacing: 0) {
-            Masthead(title: "Circle", editionDate: editionDate)
+            Masthead(title: "Circle", stamp: editionDate)
             switch issueLoader.loadState {
                 case .loading:
                     Spacer()
@@ -61,6 +63,10 @@ struct CardFeedView: View {
             .contentMargins(.top, topGap, for: .scrollContent)
             .contentMargins(.bottom, peek, for: .scrollContent)
             .scrollIndicators(.hidden)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: {
+                cardSize = CGSize(width: $0.width - 2 * Style.Space.md,
+                                  height: $0.height - peek - topGap)
+            }
         }
     }
 }
@@ -122,5 +128,5 @@ private struct ContributorBubble: View {
 }
 
 #Preview {
-    CardFeedView(issueLoader: .preview(.loaded(Magazine.sample)))
+    CardFeedView(issueLoader: .preview(.loaded(Magazine.sample)), cardSize: .constant(nil))
 }

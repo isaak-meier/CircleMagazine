@@ -26,9 +26,6 @@ struct SplashView: View {
 
     @State private var showHint = false
     @State private var tap: CGPoint?
-    @State private var holeRadius: CGFloat = 0
-
-    private let rippleDuration: TimeInterval = 1.2
 
     var body: some View {
         GeometryReader { geo in
@@ -51,76 +48,16 @@ struct SplashView: View {
                         .padding(.bottom, 40)
                 }
             }
-            .keyframeAnimator(initialValue: 0.0, trigger: tap) { view, elapsedTime in
-                view.modifier(RippleModifier(origin: tap, elapsedTime: elapsedTime, duration: rippleDuration))
-            } keyframes: { _ in
-                LinearKeyframe(rippleDuration, duration: rippleDuration)
-            }
             .contentShape(Rectangle())
-            .mask {
-                if let tap {
-                    HoleShape(center: tap, radius: holeRadius).fill(style: FillStyle(eoFill: true))
-                } else {
-                    Rectangle()
-                }
-            }
+            .rippleReveal(origin: tap, onFinished: onReveal)
             .onTapGesture(coordinateSpace: .local) { location in
-                fire(at: location, in: geo.size)
+                if tap == nil { tap = location }
             }
         }
         .ignoresSafeArea()
         .task {
             try? await Task.sleep(for: .seconds(3))
             withAnimation(.easeIn(duration: 0.6)) { showHint = true }
-        }
-    }
-
-    private func maxRadius(from p: CGPoint, in size: CGSize) -> CGFloat {
-        hypot(max(p.x, size.width - p.x), max(p.y, size.height - p.y))
-    }
-
-    private func fire(at location: CGPoint, in size: CGSize) {
-        guard tap == nil else { return }
-        tap = location
-        withAnimation(.easeIn(duration: 0.9)) { holeRadius = maxRadius(from: location, in: size) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + rippleDuration) { onReveal() }
-    }
-}
-
-/// Plays the `Ripple` Metal shader as a `layerEffect` radiating from `origin`.
-/// `elapsedTime` is animated 0…duration to drive the wave; inert until a tap sets
-/// an origin, so it doesn't fire on first appearance.
-private struct RippleModifier: ViewModifier {
-    var origin: CGPoint?
-    var elapsedTime: TimeInterval
-    var duration: TimeInterval
-
-    var amplitude: Double = 12
-    var frequency: Double = 15
-    var decay: Double = 8
-    var speed: Double = 1200
-
-    // Only attach the layerEffect once a tap is in flight. Attaching it at all
-    // forces SwiftUI to compile the Metal pipeline — and on the Simulator that
-    // compile takes seconds, which is what hung the app at launch.
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let o = origin, elapsedTime > 0, elapsedTime < duration {
-            content.visualEffect { view, _ in
-                view.layerEffect(
-                    ShaderLibrary.Ripple(
-                        .float2(o),
-                        .float(Float(elapsedTime)),
-                        .float(Float(amplitude)),
-                        .float(Float(frequency)),
-                        .float(Float(decay)),
-                        .float(Float(speed))
-                    ),
-                    maxSampleOffset: CGSize(width: amplitude, height: amplitude)
-                )
-            }
-        } else {
-            content
         }
     }
 }
@@ -148,25 +85,6 @@ private struct ArcText: View {
             }
         }
         .frame(width: radius * 2, height: radius * 2)
-    }
-}
-
-/// A full-rect path with a circular hole punched out (even-odd fill) — used as a
-/// mask to reveal what's beneath as the radius grows.
-private struct HoleShape: Shape {
-    var center: CGPoint
-    var radius: CGFloat
-
-    var animatableData: CGFloat {
-        get { radius }
-        set { radius = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        var p = Path(rect)
-        p.addEllipse(in: CGRect(x: center.x - radius, y: center.y - radius,
-                                width: radius * 2, height: radius * 2))
-        return p
     }
 }
 

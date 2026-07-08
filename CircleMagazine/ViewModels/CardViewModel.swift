@@ -14,6 +14,7 @@ struct CardViewModel: Identifiable {
     let title: String?
     let caption: String?
     let captionStyle: CaptionStyle
+    let cardShape: CardShape
 
     init(from page: MagazinePage) {
         self.id = page.page.id
@@ -21,9 +22,22 @@ struct CardViewModel: Identifiable {
         self.title = page.page.title
         self.caption = page.page.caption
         self.captionStyle = page.page.captionStyle ?? .paperPlate
+        self.cardShape = page.page.cardShape ?? .tall
         self.media = page.pageMedia
             .sorted { ($0.position ?? 0) < ($1.position ?? 0) }
             .map(CardMediaViewModel.init)
+    }
+
+    /// Compose live preview — a card that doesn't exist in the DB yet.
+    init(previewing source: VideoSource, author: User?, title: String?, caption: String?,
+         captionStyle: CaptionStyle, cardShape: CardShape) {
+        self.id = UUID()
+        self.media = [.video(source)]
+        self.author = author
+        self.title = title
+        self.caption = caption
+        self.captionStyle = captionStyle
+        self.cardShape = cardShape
     }
 }
 

@@ -89,6 +89,33 @@ final class DatabaseService {
     return issues.first?.id
   }
 
+  /// Circles the user belongs to, each with its full member list (for bubble
+  /// size and the sheet's avatar row).
+  /// ponytail: loads every member of every circle — fine at friend-group
+  /// scale; switch to a count aggregate if circles get big.
+  func fetchCircles(memberOf userId: UUID) async throws -> [CircleSummary] {
+    let mine: [CircleMember] = try await supabase.from("circle_members")
+      .select().eq("user_id", value: userId.uuidString).execute().value
+    let circleIds = mine.map(\.circleId.uuidString)
+    guard !circleIds.isEmpty else { return [] }
+
+    let circles: [Circle] = try await supabase.from("circles")
+      .select().in("id", values: circleIds).execute().value
+    let members: [CircleMember] = try await supabase.from("circle_members")
+      .select().in("circle_id", values: circleIds).execute().value
+
+    let userIds = Array(Set(members.map(\.userId.uuidString)))
+    let users: [User] = userIds.isEmpty ? [] : try await supabase.from("users")
+      .select().in("id", values: userIds).execute().value
+    let usersById = Dictionary(uniqueKeysWithValues: users.map { ($0.id, $0) })
+    let membersByCircle = Dictionary(grouping: members, by: \.circleId)
+
+    return circles.map { circle in
+      CircleSummary(circle: circle,
+                    members: (membersByCircle[circle.id] ?? []).compactMap { usersById[$0.userId] })
+    }
+  }
+
   // MARK: - Writes
 
   /// Creates a video post. For a YouTube URL we look up the real video title via
@@ -97,14 +124,14 @@ final class DatabaseService {
   /// leaves the title nil rather than blocking the post.
   @discardableResult
   func createVideoPost(issueId: UUID, authorId: UUID, videoURL: URL, caption: String?,
-                       captionStyle: CaptionStyle) async throws -> Page {
+                       captionStyle: CaptionStyle, cardShape: CardShape) async throws -> Page {
     var title: String?
     if case .youtube(let id)? = VideoSource(videoURL) {
       title = await YouTubeOEmbed.title(forVideoID: id)
     }
     let page: Page = try await supabase.from("pages")
       .insert(PageInsert(issueId: issueId, submittedBy: authorId, title: title,
-                         caption: caption, captionStyle: captionStyle))
+                         caption: caption, captionStyle: captionStyle, cardShape: cardShape))
       .select().single().execute().value
     try await supabase.from("page_media")
       .insert(PageMediaInsert(pageId: page.id, mediaUrl: videoURL.absoluteString,
