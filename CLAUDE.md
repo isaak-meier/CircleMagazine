@@ -4,15 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Test
 
-This is a native Xcode project. Open `CircleMagazine/CircleMagazine.xcodeproj` in Xcode (Cmd+R to run, Cmd+U to test).
+This is a native Xcode project. Open `CircleMagazine.xcodeproj` in Xcode (Cmd+R to run, Cmd+U to test).
 
 From the command line:
 ```bash
 # Build
-xcodebuild -project CircleMagazine/CircleMagazine.xcodeproj -scheme CircleMagazine -configuration Debug
+xcodebuild -project CircleMagazine.xcodeproj -scheme CircleMagazine -configuration Debug
 
 # Run tests
-xcodebuild test -project CircleMagazine/CircleMagazine.xcodeproj -scheme CircleMagazine
+xcodebuild test -project CircleMagazine.xcodeproj -scheme CircleMagazine
 ```
 
 ## Secrets Setup
@@ -23,6 +23,14 @@ SUPABASE_URL = https://your-project.supabase.co
 SUPABASE_ANON_KEY = your-anon-key
 ```
 `Config.xcconfig` (committed) includes this file and injects values into Info.plist at build time. `DatabaseService` reads them from the bundle at runtime. Xcode Preview mode is detected and uses dummy credentials to avoid crashes.
+
+## Reuse First
+
+Re-use existing code wherever possible. Before writing a new view, helper, or style, check whether one already exists (especially in `Views/Reused Components/` and `Style.swift`) and use or extend it instead of writing a parallel copy.
+
+## Style Guide
+
+`CircleMagazine/Style.swift` is the design system. Whenever it defines a token that fits — fonts, spacing (`Style.Space`), colors, radii — use it instead of literal values. Only fall back to literals for one-off values the style file doesn't cover.
 
 ## Architecture
 

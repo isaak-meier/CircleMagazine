@@ -14,7 +14,6 @@ struct RootTabView: View {
     let account: AccountManager
     @State private var tab: Tab = .feed
     @State private var composing = false
-    @State private var feedCardSize: CGSize?
 
     /// A circle being entered from the Circles tab: the chat sits beneath the
     /// tab UI while the splash-style ripple reveals it from the tap point.
@@ -50,7 +49,7 @@ struct RootTabView: View {
     private var tabsAndNavBar: some View {
         VStack(spacing: 0) {
             ZStack {
-                CardFeedView(issueLoader: issueLoader, cardSize: $feedCardSize)
+                CardFeedView(issueLoader: issueLoader)
                     .opacity(tab == .feed ? 1 : 0).allowsHitTesting(tab == .feed)
                 CirclesView(db: issueLoader.db, account: account,
                             active: tab == .circles && entered == nil) { summary, tone, origin in
@@ -73,8 +72,7 @@ struct RootTabView: View {
     private var composeSheet: some View {
         switch account.authState {
         case .signedIn(let user):
-            ComposeView(db: issueLoader.db, issueId: liveIssueId, author: user,
-                        previewCardSize: feedCardSize) {
+            ComposeView(db: issueLoader.db, issueId: liveIssueId, author: user) {
                 tab = .feed
                 await issueLoader.refresh()
             }

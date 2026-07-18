@@ -11,8 +11,6 @@ import SwiftUI
 
 struct CardFeedView: View {
     let issueLoader: IssueLoader
-    /// Reports the measured card size up so Compose can preview at feed size.
-    @Binding var cardSize: CGSize?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,7 +25,24 @@ struct CardFeedView: View {
                     ContributorsRow(contributors: magazine.contributors)
                     viewport(for: magazine)
                 case .failedToLoad(let errorStr):
-                    Text(errorStr)
+                    Spacer()
+                    VStack(spacing: Style.Space.md) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.system(size: 32))
+                            .foregroundStyle(Style.meta)
+                        Text("Hmm.. I didn't expect that.")
+                            .font(Style.cardTitle)
+                            .foregroundStyle(Style.ink)
+                        Text("Try again in a little while.")
+                            .font(Style.body)
+                            .foregroundStyle(Style.meta)
+                        Text(errorStr)
+                            .font(Style.stamp)
+                            .foregroundStyle(Style.meta.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, Style.Space.xl)
+                    Spacer()
             }
         }
         .background(Style.chrome)
@@ -43,31 +58,23 @@ struct CardFeedView: View {
     // MARK: Peek-paged card viewport
 
     private func viewport(for magazine: Magazine) -> some View {
-        GeometryReader { geo in
-            let peek = Style.Space.xxl              // lip of the next card at the bottom
-            let topGap = Style.Space.sm             // small space under the contributors row
-            let cardHeight = geo.size.height - peek - topGap
-            ScrollView(.vertical) {
-                LazyVStack(spacing: Style.Space.sm) {
-                    ForEach(magazine.cards) { cardViewModel in
-                        CardView(viewModel: cardViewModel)
-                            .frame(height: cardHeight)
-                            .padding(.horizontal, Style.Space.md)
-                    }
+        let peek = Style.Space.xxl              // lip of the next card at the bottom
+        let topGap = Style.Space.sm             // small space under the contributors row
+        return ScrollView(.vertical) {
+            LazyVStack(spacing: Style.Space.sm) {
+                ForEach(magazine.cards) { cardViewModel in
+                    CardView(viewModel: cardViewModel)
+                        .feedCardFrame()
                 }
-                .scrollTargetLayout()
             }
-            // viewAligned snaps to each card; asymmetric margins keep the first
-            // card close under the contributors row while still peeking the next.
-            .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
-            .contentMargins(.top, topGap, for: .scrollContent)
-            .contentMargins(.bottom, peek, for: .scrollContent)
-            .scrollIndicators(.hidden)
-            .onGeometryChange(for: CGSize.self) { $0.size } action: {
-                cardSize = CGSize(width: $0.width - 2 * Style.Space.md,
-                                  height: $0.height - peek - topGap)
-            }
+            .scrollTargetLayout()
         }
+        // viewAligned snaps to each card; asymmetric margins keep the first
+        // card close under the contributors row while still peeking the next.
+        .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+        .contentMargins(.top, topGap, for: .scrollContent)
+        .contentMargins(.bottom, peek, for: .scrollContent)
+        .scrollIndicators(.hidden)
     }
 }
 
@@ -128,5 +135,5 @@ private struct ContributorBubble: View {
 }
 
 #Preview {
-    CardFeedView(issueLoader: .preview(.loaded(Magazine.sample)), cardSize: .constant(nil))
+    CardFeedView(issueLoader: .preview(.loaded(Magazine.sample)))
 }

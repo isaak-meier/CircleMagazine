@@ -45,6 +45,19 @@ enum Style {
     static let eyebrow   = Font.system(size: 9, weight: .semibold)   // small-caps section label
 }
 
+extension View {
+    /// Screen-filling feed-card size, inferred from the enclosing scroll
+    /// container rather than measured and plumbed. The feed and the compose
+    /// preview both apply this so they render the card at the same size.
+    /// Width leaves a side margin; height leaves the next-card peek and the gap
+    /// under the header row so the following card lips into view.
+    func feedCardFrame() -> some View {
+        self
+            .containerRelativeFrame(.horizontal) { w, _ in w - 2 * Style.Space.md }
+            .containerRelativeFrame(.vertical)   { h, _ in h - Style.Space.xxl - Style.Space.sm }
+    }
+}
+
 extension Color {
     /// Build a color from a 0xRRGGBB literal — lets us paste the mockup's hex.
     init(hex: UInt) {

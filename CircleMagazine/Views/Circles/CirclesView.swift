@@ -195,7 +195,6 @@ struct CirclesView: View {
     var body: some View {
         VStack(spacing: 0) {
             Masthead(title: "Circles", stamp: stampText, eyebrow: "YOU BELONG TO")
-            legendRow
             switch state {
             case .loading:
                 Spacer()
@@ -207,11 +206,9 @@ struct CirclesView: View {
                     .multilineTextAlignment(.center).padding(.horizontal, 40)
                 Spacer()
             case .loaded(let circles) where circles.isEmpty:
-                Spacer()
-                Text("You don't belong to any circles yet.")
-                    .font(Style.body).foregroundStyle(Style.meta)
-                Spacer()
+                emptyState
             case .loaded(let circles):
+                joinCreateRow
                 bubbleField(circles)
             }
         }
@@ -219,23 +216,41 @@ struct CirclesView: View {
         .task { await load() }
     }
 
+    // MARK: Join / Create
+
+    // ponytail: no join/create flow yet — wire real actions when one exists.
+    private var joinCreateRow: some View {
+        HStack(spacing: Style.Space.sm) {
+            CirclePillButton(title: "Join a Circle", filled: true) {}
+            CirclePillButton(title: "Create a Circle", filled: false) {}
+        }
+        .padding(.horizontal, Style.Space.xl)
+        .padding(.vertical, Style.Space.sm + 2)
+    }
+
+    // The mockup's empty state: floating pastel circles behind a centered
+    // message and full-width Join/Create pills.
+    private var emptyState: some View {
+        ZStack {
+            FloatingBackdrop()
+            VStack(spacing: Style.Space.xl) {
+                Text("You don't belong to any circles yet.")
+                    .font(Style.field).foregroundStyle(Style.meta)
+                    .multilineTextAlignment(.center)
+                VStack(spacing: 14) {
+                    CirclePillButton(title: "Join a Circle", filled: true, height: 58) {}
+                    CirclePillButton(title: "Create a Circle", filled: false, height: 58) {}
+                }
+            }
+            .padding(.horizontal, Style.Space.xxl)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+
     private var stampText: String? {
         guard case .loaded(let circles) = state, !circles.isEmpty else { return nil }
         return "\(circles.count) CIRCLE\(circles.count == 1 ? "" : "S")"
-    }
-
-    private var legendRow: some View {
-        HStack {
-            Text("YOUR CIRCLES")
-                .foregroundStyle(Color(hex: 0x9A958E))
-            Spacer()
-            Text("TAP TO ENTER")
-                .foregroundStyle(Color(hex: 0xB84C4C))
-        }
-        .font(.system(size: 9, weight: .medium, design: .monospaced))
-        .tracking(1.2)
-        .padding(.horizontal, Style.Space.lg)
-        .padding(.vertical, Style.Space.sm)
     }
 
     private func bubbleField(_ circles: [CircleSummary]) -> some View {
@@ -280,6 +295,30 @@ struct CirclesView: View {
 
 // MARK: - Bubble
 
+/// The bubble's sphere — radial-gradient fill with a gloss highlight, like
+/// light on a marble. Shared by the collage bubbles and the empty-state
+/// backdrop so they always look like the same object.
+private struct BubbleSurface: View {
+    let tone: CircleBubbleLayout.BubbleTone
+    let diameter: CGFloat
+
+    var body: some View {
+        ZStack {
+            SwiftUI.Circle()
+                .fill(RadialGradient(colors: [tone.hi, tone.lo],
+                                     center: UnitPoint(x: 0.34, y: 0.28),
+                                     startRadius: 0, endRadius: diameter * 0.75))
+                .shadow(color: .black.opacity(0.18), radius: 13, y: 6)
+            Ellipse()
+                .fill(RadialGradient(colors: [.white.opacity(0.32), .white.opacity(0)],
+                                     center: .center, startRadius: 0, endRadius: diameter * 0.22))
+                .frame(width: diameter * 0.44, height: diameter * 0.30)
+                .offset(x: -diameter * 0.14, y: -diameter * 0.28)
+        }
+        .frame(width: diameter, height: diameter)
+    }
+}
+
 private struct CircleBubble: View {
     let summary: CircleSummary
     let slot: CircleBubbleLayout.Slot
@@ -292,17 +331,7 @@ private struct CircleBubble: View {
     var body: some View {
         let d = slot.diameter * scale
         ZStack {
-                SwiftUI.Circle()
-                    .fill(RadialGradient(colors: [slot.tone.hi, slot.tone.lo],
-                                         center: UnitPoint(x: 0.34, y: 0.28),
-                                         startRadius: 0, endRadius: d * 0.75))
-                    .shadow(color: .black.opacity(0.18), radius: 13, y: 6)
-                // Gloss highlight, top-left, like light on a marble.
-                Ellipse()
-                    .fill(RadialGradient(colors: [.white.opacity(0.32), .white.opacity(0)],
-                                         center: .center, startRadius: 0, endRadius: d * 0.22))
-                    .frame(width: d * 0.44, height: d * 0.30)
-                    .offset(x: -d * 0.14, y: -d * 0.28)
+                BubbleSurface(tone: slot.tone, diameter: d)
                 VStack(spacing: 5 * scale) {
                     Text(summary.name)
                         .font(.system(size: min(23, max(12, slot.diameter * 0.135)) * scale,
@@ -325,6 +354,84 @@ private struct CircleBubble: View {
         }
         .position(x: center.x * scale, y: center.y * scale)
         .zIndex(slot.diameter)  // bigger bubbles float above smaller neighbors
+    }
+}
+
+// MARK: - Join / Create pill
+
+private struct CirclePillButton: View {
+    let title: String
+    let filled: Bool
+    var height: CGFloat = 34
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Style.button)
+                .foregroundStyle(filled ? Style.paper : Style.ink)
+                .frame(maxWidth: .infinity)
+                .frame(height: height)
+                .background {
+                    if filled {
+                        Capsule().fill(Style.ink)
+                    } else {
+                        Capsule().strokeBorder(Style.ink, lineWidth: 1.5)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Empty-state backdrop
+
+// Drifting ghost bubbles behind the empty-state message — the same
+// BubbleSurface the collage uses, faded, in the collage's own tones.
+private struct FloatingBackdrop: View {
+    private struct Dot {
+        let toneIndex: Int, diameter: CGFloat, opacity: Double, duration: Double
+        /// Center position given the field size (mockup edge-anchored offsets).
+        let center: (CGSize) -> CGPoint
+    }
+
+    private static let dots: [Dot] = [
+        Dot(toneIndex: 0, diameter: 120, opacity: 0.55, duration: 7,
+            center: { _ in CGPoint(x: 30, y: 80) }),
+        Dot(toneIndex: 1, diameter: 90, opacity: 0.6, duration: 6,
+            center: { CGPoint(x: $0.width - 5, y: 125) }),
+        Dot(toneIndex: 2, diameter: 70, opacity: 0.55, duration: 8,
+            center: { CGPoint(x: 55, y: $0.height - 155) }),
+        Dot(toneIndex: 3, diameter: 140, opacity: 0.5, duration: 9,
+            center: { CGPoint(x: $0.width - 100, y: $0.height - 130) }),
+        Dot(toneIndex: 4, diameter: 50, opacity: 0.6, duration: 6.5,
+            center: { CGPoint(x: $0.width / 2 + 25, y: $0.height * 0.4 + 25) }),
+    ]
+
+    var body: some View {
+        GeometryReader { geo in
+            ForEach(Array(Self.dots.enumerated()), id: \.offset) { i, dot in
+                FloatingDot(dot: dot, startsHigh: i.isMultiple(of: 2))
+                    .position(dot.center(geo.size))
+            }
+        }
+    }
+
+    private struct FloatingDot: View {
+        let dot: Dot
+        let startsHigh: Bool
+        @State private var up = false
+
+        var body: some View {
+            BubbleSurface(tone: CircleBubbleLayout.slots[dot.toneIndex].tone,
+                          diameter: dot.diameter)
+                .opacity(dot.opacity)
+                .offset(y: (up != startsHigh) ? 8 : -8)
+                .onAppear {
+                    withAnimation(.easeInOut(duration: dot.duration)
+                        .repeatForever(autoreverses: true)) { up = true }
+                }
+        }
     }
 }
 

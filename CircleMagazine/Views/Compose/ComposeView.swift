@@ -98,14 +98,10 @@ struct ComposeView: View {
     @Environment(\.dismiss) private var dismiss
     /// Called when the post lands, so the feed can refresh to include it.
     let onPosted: () async -> Void
-    /// The feed's measured card size, so the preview is the card at its real
-    /// size. nil (feed not laid out yet) leaves the preview unconstrained.
-    let previewCardSize: CGSize?
 
-    init(db: DatabaseService, issueId: UUID?, author: User, previewCardSize: CGSize? = nil,
+    init(db: DatabaseService, issueId: UUID?, author: User,
          onPosted: @escaping () async -> Void) {
         _model = State(initialValue: ComposeModel(db: db, issueId: issueId, author: author))
-        self.previewCardSize = previewCardSize
         self.onPosted = onPosted
     }
 
@@ -281,8 +277,7 @@ struct ComposeView: View {
                     title: resolved.title,
                     caption: model.caption.isEmpty ? nil : model.caption,
                     captionStyle: model.captionStyle, cardShape: resolved.shape))
-                    .frame(width: previewCardSize?.width, height: previewCardSize?.height)
-                    .frame(maxWidth: .infinity)   // feed-width card centered in compose's narrower column
+                    .feedCardFrame()   // feed-size card, inferred from the sheet's width
                     .allowsHitTesting(false)
 
                 sectionLabel("Caption style").padding(.top, 22).padding(.bottom, 11)
