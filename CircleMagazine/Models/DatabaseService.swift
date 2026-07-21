@@ -140,6 +140,19 @@ final class DatabaseService {
     return page
   }
 
+    func createCircle(name: String, creatorID: UUID) async throws -> Circle {
+
+        let circle: Circle = try await supabase.from("circles")
+            .insert(CircleInsert(name: name, createdBy: creatorID))
+            .select().single().execute().value
+
+        // insert first member
+        try await supabase.from("circle_members")
+            .insert(CircleMember(circleId: circle.id, userId: creatorID, joinedAt: Date()))
+            .execute()
+
+        return circle
+    }
 }
 
 /// Keyless lookup of a YouTube video's public title via the official oEmbed

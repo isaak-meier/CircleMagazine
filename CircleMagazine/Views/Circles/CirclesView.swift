@@ -169,6 +169,11 @@ final class BubblePhysics {
 
 // MARK: - Screen
 
+enum ActiveSheet: Identifiable {
+    case join, create
+    var id: Self { self }
+}
+
 struct CirclesView: View {
     let db: DatabaseService
     let account: AccountManager
@@ -180,6 +185,7 @@ struct CirclesView: View {
 
     enum LoadState { case loading, loaded([CircleSummary]), failed(String) }
     @State private var state: LoadState
+    @State private var sheetState: ActiveSheet?
     @State private var physics = BubblePhysics()
 
     init(db: DatabaseService, account: AccountManager, active: Bool = true,
@@ -214,6 +220,17 @@ struct CirclesView: View {
         }
         .background(Style.chrome)
         .task { await load() }
+        .sheet(item: $sheetState) { sheet in
+            switch sheet {
+            case .create:
+                CreateCircleSheet(onCreate: create)
+            case .join:
+                // ponytail: join flow not designed yet.
+                Text("Join flow coming soon")
+                    .font(Style.body).foregroundStyle(Style.meta)
+                    .presentationDetents([.medium])
+            }
+        }
     }
 
     // MARK: Join / Create
@@ -221,8 +238,12 @@ struct CirclesView: View {
     // ponytail: no join/create flow yet — wire real actions when one exists.
     private var joinCreateRow: some View {
         HStack(spacing: Style.Space.sm) {
-            CirclePillButton(title: "Join a Circle", filled: true) {}
-            CirclePillButton(title: "Create a Circle", filled: false) {}
+            CirclePillButton(title: "Join a Circle", filled: true) {
+                self.sheetState = .join
+            }
+            CirclePillButton(title: "Create a Circle", filled: false) {
+                self.sheetState = .create
+            }
         }
         .padding(.horizontal, Style.Space.xl)
         .padding(.vertical, Style.Space.sm + 2)
@@ -238,8 +259,12 @@ struct CirclesView: View {
                     .font(Style.field).foregroundStyle(Style.meta)
                     .multilineTextAlignment(.center)
                 VStack(spacing: 14) {
-                    CirclePillButton(title: "Join a Circle", filled: true, height: 58) {}
-                    CirclePillButton(title: "Create a Circle", filled: false, height: 58) {}
+                    CirclePillButton(title: "Join a Circle", filled: true, height: 58) {
+                        sheetState = .join
+                    }
+                    CirclePillButton(title: "Create a Circle", filled: false, height: 58) {
+                        sheetState = .create
+                    }
                 }
             }
             .padding(.horizontal, Style.Space.xxl)
@@ -290,6 +315,17 @@ struct CirclesView: View {
         } catch {
             state = .failed("Couldn't load your circles — \(error.localizedDescription)")
         }
+    }
+
+    /// Creates the circle and grows a new bubble for it in place. Throws so the
+    /// sheet can show the failure and keep the typed name for a retry.
+    private func create(named name: String) async throws {
+        guard case .signedIn(let user) = account.authState else { return }
+        let circle = try await db.createCircle(name: name, creatorID: user.id)
+        if case .loaded(let circles) = state {
+            state = .loaded(circles + [CircleSummary(circle: circle, members: [user])])
+        }
+        sheetState = nil
     }
 }
 
@@ -384,6 +420,59 @@ private struct CirclePillButton: View {
     }
 }
 
+// MARK: - Create sheet
+
+/// The naming sheet: one field, one confirm. Creation itself is the caller's
+/// job, via onCreate with the trimmed name — a throw keeps the sheet open with
+/// the name intact and shows the error.
+private struct CreateCircleSheet: View {
+    let onCreate: (String) async throws -> Void
+    @State private var name = ""
+    @State private var submitting = false
+    @State private var error: String?
+
+    private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(spacing: Style.Space.xl) {
+            Text("Create a Circle")
+                .font(.system(size: 24, weight: .bold, design: .serif))
+                .foregroundStyle(Style.ink)
+            TextField("Name your circle", text: $name)
+                .font(Style.field)
+                .padding(.horizontal, Style.Space.lg).padding(.vertical, 12)
+                .background(Capsule().fill(Style.paper))
+                .overlay(Capsule().stroke(Style.rule, lineWidth: 1))
+                .onSubmit(submit)
+            if let error {
+                ErrorBanner(message: error)
+            }
+            CirclePillButton(title: submitting ? "Creating…" : "Create",
+                             filled: true, height: 50, action: submit)
+                .disabled(trimmed.isEmpty || submitting)
+                .opacity(trimmed.isEmpty || submitting ? 0.35 : 1)
+        }
+        .padding(Style.Space.xxl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Style.chrome)
+        .presentationDetents([.medium])
+    }
+
+    private func submit() {
+        guard !trimmed.isEmpty, !submitting else { return }
+        submitting = true
+        error = nil
+        Task {
+            do {
+                try await onCreate(trimmed)
+            } catch {
+                self.error = "Couldn't create your circle — \(error.localizedDescription)"
+            }
+            submitting = false
+        }
+    }
+}
+
 // MARK: - Empty-state backdrop
 
 // Drifting ghost bubbles behind the empty-state message — the same
@@ -449,11 +538,6 @@ private struct FloatingBackdrop: View {
     let db = DatabaseService()
     return CirclesView(db: db, account: AccountManager(db: db), initial: .loaded([
         circle("Dean", ["Dave Smith", "Arnell R", "Sawyer W", "Phil H", "Mia G", "Tom L"]),
-        circle("Sunday Roast", ["Mia G", "Tom L", "Jess R"]),
-        circle("Ridgeline", ["Kate B", "Nick R"]),
-        circle("Analog Heads", ["Elle L"]),
-        circle("The Archive", ["Arnell R", "Dave Smith", "Mia G", "Kate B"]),
-        circle("Cold Plunge", ["Sawyer W", "Tom L", "Jess R", "Phil H", "Elle L"]),
-        circle("Night Shift", ["Phil H", "Elle L"]),
+        circle("Spiritual Miracles", ["Ben B", "Tom L", "Jess R"]),
     ]), onEnter: { _, _, _ in })
 }

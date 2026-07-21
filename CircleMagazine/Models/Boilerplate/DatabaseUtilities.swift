@@ -23,6 +23,16 @@ struct PageInsert: Encodable {
     }
 }
 
+struct CircleInsert: Encodable {
+    let name: String
+    let createdBy: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case createdBy = "created_by"
+    }
+}
+
 struct PageMediaInsert: Encodable {
     let pageId: UUID
     let mediaUrl: String?
