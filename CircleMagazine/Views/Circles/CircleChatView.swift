@@ -77,6 +77,7 @@ struct CircleChatView: View {
 
     @State private var messages: [ChatMessage]
     @State private var draft = ""
+    @State private var showInvite = false
 
     init(summary: CircleSummary, tone: CircleBubbleLayout.BubbleTone, me: User,
          seed: [ChatMessage] = [], onBack: @escaping () -> Void) {
@@ -95,6 +96,7 @@ struct CircleChatView: View {
             inputBar
         }
         .background(Style.chrome)
+        .sheet(isPresented: $showInvite) { InviteSheet(summary: summary) }
     }
 
     // MARK: Header
@@ -117,6 +119,12 @@ struct CircleChatView: View {
                     .lineLimit(1)
             }
             Spacer()
+            Button { showInvite = true } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Style.ink)
+                    .frame(width: 30, alignment: .trailing)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -356,6 +364,44 @@ struct CircleChatView: View {
     }
 }
 
+// MARK: - Invite sheet
+
+/// The circle's invite code, big and selectable, with a shortcut into Messages.
+/// Lives here with the chat but is also the members screen's invite sheet.
+struct InviteSheet: View {
+    let summary: CircleSummary
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(spacing: Style.Space.xl) {
+            Text("Invite to \(summary.name)")
+                .font(.system(size: 24, weight: .bold, design: .serif))
+                .foregroundStyle(Style.ink)
+            Text("Share this code — friends enter it under Join a Circle.")
+                .font(.system(size: 12)).foregroundStyle(Style.meta)
+                .multilineTextAlignment(.center)
+            Text(summary.circle.inviteCode)
+                .font(.system(size: 34, weight: .semibold, design: .monospaced))
+                .tracking(6)
+                .foregroundStyle(Style.ink)
+                .textSelection(.enabled)
+                .padding(.horizontal, Style.Space.xl).padding(.vertical, Style.Space.md)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Style.paper))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Style.rule, lineWidth: 1))
+            CirclePillButton(title: "Invite via Text", filled: true, height: 50) {
+                let code = summary.circle.inviteCode
+                let text = "Join my circle “\(summary.name)” on Circle Magazine — invite code \(code). Tap to join: circlemagazine://join?code=\(code)"
+                let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+                if let url = URL(string: "sms:?&body=\(encoded)") { openURL(url) }
+            }
+        }
+        .padding(Style.Space.xxl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Style.chrome)
+        .presentationDetents([.medium])
+    }
+}
+
 // MARK: - Preview
 
 #Preview {
@@ -366,7 +412,8 @@ struct CircleChatView: View {
     let me = user("You Person")
     let dave = user("Dave Slater"), arnell = user("Arnell R"), sawyer = user("Sawyer W")
     let summary = CircleSummary(
-        circle: Circle(id: UUID(), name: "Dean St.", createdBy: arnell.id, createdAt: nil),
+        circle: Circle(id: UUID(), name: "Dean St.", createdBy: arnell.id, createdAt: nil,
+                       inviteCode: "ABC123"),
         members: [dave, arnell, sawyer, me])
     let msg = { (author: User, text: String) in
         ChatMessage(author: author, kind: .text(text), sentAt: .now)

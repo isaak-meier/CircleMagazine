@@ -19,6 +19,11 @@ final class IssueLoader {
   let db: DatabaseService
   private(set) var loadState: IssueLoadState = .loading
 
+  /// Account-screen preference: preview the newest draft issue instead of the
+  /// live one. Read at fetch time, so a toggle just needs a refresh() after.
+  static let showDraftKey = "showDraftIssue"
+  private var live: Bool { !UserDefaults.standard.bool(forKey: Self.showDraftKey) }
+
   init(db: DatabaseService) {
     self.db = db
   }
@@ -33,7 +38,7 @@ final class IssueLoader {
   /// already-loaded magazine stays on screen until the new one arrives.
   func refresh() async {
     do {
-      loadState = .loaded(try await db.fetchCurrentIssue())
+      loadState = .loaded(try await db.fetchCurrentIssue(live: live))
     } catch {
       loadState = .failedToLoad(error: error.localizedDescription)
     }
@@ -47,7 +52,7 @@ final class IssueLoader {
       return
     }
     do {
-      let liveId = try await db.currentIssueId()
+      let liveId = try await db.currentIssueId(live: live)
       if liveId != cachedState.issue.id { await refresh() }  // new issue → refetch
     } catch {
       // transient check failure → keep showing the cached magazine

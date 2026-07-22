@@ -169,8 +169,10 @@ final class BubblePhysics {
 
 // MARK: - Screen
 
-enum ActiveSheet: Identifiable {
-    case join, create
+enum ActiveSheet: Identifiable, Hashable {
+    /// prefill: an invite code arriving via deep link, typed for the user.
+    case join(prefill: String?)
+    case create
     var id: Self { self }
 }
 
@@ -183,24 +185,32 @@ struct CirclesView: View {
     /// "root" coordinate space — RootTabView ripples into the chat from there.
     let onEnter: (CircleSummary, CircleBubbleLayout.BubbleTone, CGPoint) -> Void
 
+    /// An invite code arriving via deep link — consumed (reset to nil) once the
+    /// join sheet opens with it.
+    @Binding var joinCode: String?
+
     enum LoadState { case loading, loaded([CircleSummary]), failed(String) }
     @State private var state: LoadState
     @State private var sheetState: ActiveSheet?
     @State private var physics = BubblePhysics()
 
     init(db: DatabaseService, account: AccountManager, active: Bool = true,
-         initial: LoadState = .loading,
+         initial: LoadState = .loading, joinCode: Binding<String?> = .constant(nil),
          onEnter: @escaping (CircleSummary, CircleBubbleLayout.BubbleTone, CGPoint) -> Void) {
         self.db = db
         self.account = account
         self.active = active
         self.onEnter = onEnter
+        _joinCode = joinCode
         _state = State(initialValue: initial)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            Masthead(title: "Circles", stamp: stampText, eyebrow: "YOU BELONG TO")
+            Masthead(title: "Circles")
+                .overlay(alignment: .trailing) {
+                    joinCreateMenu.padding(.trailing, Style.Space.lg)
+                }
             switch state {
             case .loading:
                 Spacer()
@@ -214,7 +224,6 @@ struct CirclesView: View {
             case .loaded(let circles) where circles.isEmpty:
                 emptyState
             case .loaded(let circles):
-                joinCreateRow
                 bubbleField(circles)
             }
         }
@@ -223,30 +232,37 @@ struct CirclesView: View {
         .sheet(item: $sheetState) { sheet in
             switch sheet {
             case .create:
-                CreateCircleSheet(onCreate: create)
-            case .join:
-                // ponytail: join flow not designed yet.
-                Text("Join flow coming soon")
-                    .font(Style.body).foregroundStyle(Style.meta)
-                    .presentationDetents([.medium])
+                CircleFormSheet(title: "Create a Circle", placeholder: "Name your circle",
+                                cta: "Create", busyCta: "Creating…",
+                                errorPrefix: "Couldn't create your circle", onSubmit: create)
+            case .join(let prefill):
+                CircleFormSheet(title: "Join a Circle", placeholder: "Invite code",
+                                cta: "Join", busyCta: "Joining…",
+                                errorPrefix: "Couldn't join", codeLength: 6,
+                                initialInput: prefill ?? "", onSubmit: join)
             }
+        }
+        .onChange(of: joinCode) { _, code in
+            guard let code else { return }
+            sheetState = .join(prefill: code)
+            joinCode = nil  // consume, so the same link can fire again later
         }
     }
 
     // MARK: Join / Create
 
-    // ponytail: no join/create flow yet — wire real actions when one exists.
-    private var joinCreateRow: some View {
-        HStack(spacing: Style.Space.sm) {
-            CirclePillButton(title: "Join a Circle", filled: true) {
-                self.sheetState = .join
-            }
-            CirclePillButton(title: "Create a Circle", filled: false) {
-                self.sheetState = .create
-            }
+    /// Sits in the masthead's top right — the same bare ink plus as the circle
+    /// chat/members header. The empty state keeps its full-width pills too.
+    private var joinCreateMenu: some View {
+        Menu {
+            Button("Join a Circle") { sheetState = .join(prefill: nil) }
+            Button("Create a Circle") { sheetState = .create }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Style.ink)
+                .frame(width: 30, height: 30, alignment: .trailing)
         }
-        .padding(.horizontal, Style.Space.xl)
-        .padding(.vertical, Style.Space.sm + 2)
     }
 
     // The mockup's empty state: floating pastel circles behind a centered
@@ -260,7 +276,7 @@ struct CirclesView: View {
                     .multilineTextAlignment(.center)
                 VStack(spacing: 14) {
                     CirclePillButton(title: "Join a Circle", filled: true, height: 58) {
-                        sheetState = .join
+                        sheetState = .join(prefill: nil)
                     }
                     CirclePillButton(title: "Create a Circle", filled: false, height: 58) {
                         sheetState = .create
@@ -273,10 +289,6 @@ struct CirclesView: View {
         .clipped()
     }
 
-    private var stampText: String? {
-        guard case .loaded(let circles) = state, !circles.isEmpty else { return nil }
-        return "\(circles.count) CIRCLE\(circles.count == 1 ? "" : "S")"
-    }
 
     private func bubbleField(_ circles: [CircleSummary]) -> some View {
         let ranked = circles.sorted { $0.members.count > $1.members.count }
@@ -324,6 +336,17 @@ struct CirclesView: View {
         let circle = try await db.createCircle(name: name, creatorID: user.id)
         if case .loaded(let circles) = state {
             state = .loaded(circles + [CircleSummary(circle: circle, members: [user])])
+        }
+        sheetState = nil
+    }
+
+    /// Joins via invite code and grows the circle's bubble in place. Throws so
+    /// the sheet can show the failure (bad code, network) and keep the input.
+    private func join(code: String) async throws {
+        guard case .signedIn(let user) = account.authState else { return }
+        let summary = try await db.joinCircle(code: code, userId: user.id)
+        if case .loaded(let circles) = state, !circles.contains(where: { $0.id == summary.id }) {
+            state = .loaded(circles + [summary])
         }
         sheetState = nil
     }
@@ -395,7 +418,7 @@ private struct CircleBubble: View {
 
 // MARK: - Join / Create pill
 
-private struct CirclePillButton: View {
+struct CirclePillButton: View {
     let title: String
     let filled: Bool
     var height: CGFloat = 34
@@ -420,37 +443,65 @@ private struct CirclePillButton: View {
     }
 }
 
-// MARK: - Create sheet
+// MARK: - Create / Join sheet
 
-/// The naming sheet: one field, one confirm. Creation itself is the caller's
-/// job, via onCreate with the trimmed name — a throw keeps the sheet open with
-/// the name intact and shows the error.
-private struct CreateCircleSheet: View {
-    let onCreate: (String) async throws -> Void
-    @State private var name = ""
+/// One-field form sheet shared by Create (circle name) and Join (invite code):
+/// text field — or fixed-length code boxes when codeLength is set — error
+/// banner, confirm pill. The action is the caller's job, via onSubmit with the
+/// trimmed input — a throw keeps the sheet open with the input intact and
+/// shows the error.
+private struct CircleFormSheet: View {
+    let title: String
+    let placeholder: String
+    let cta: String
+    let busyCta: String
+    let errorPrefix: String
+    var codeLength: Int? = nil
+    let onSubmit: (String) async throws -> Void
+
+    @State private var input: String
     @State private var submitting = false
     @State private var error: String?
 
-    private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    init(title: String, placeholder: String, cta: String, busyCta: String,
+         errorPrefix: String, codeLength: Int? = nil, initialInput: String = "",
+         onSubmit: @escaping (String) async throws -> Void) {
+        self.title = title
+        self.placeholder = placeholder
+        self.cta = cta
+        self.busyCta = busyCta
+        self.errorPrefix = errorPrefix
+        self.codeLength = codeLength
+        self.onSubmit = onSubmit
+        _input = State(initialValue: initialInput)
+    }
+
+    private var trimmed: String { input.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var ready: Bool { codeLength.map { trimmed.count == $0 } ?? !trimmed.isEmpty }
 
     var body: some View {
         VStack(spacing: Style.Space.xl) {
-            Text("Create a Circle")
+            Text(title)
                 .font(.system(size: 24, weight: .bold, design: .serif))
                 .foregroundStyle(Style.ink)
-            TextField("Name your circle", text: $name)
-                .font(Style.field)
-                .padding(.horizontal, Style.Space.lg).padding(.vertical, 12)
-                .background(Capsule().fill(Style.paper))
-                .overlay(Capsule().stroke(Style.rule, lineWidth: 1))
-                .onSubmit(submit)
+            if let codeLength {
+                CodeField(length: codeLength, input: $input)
+            } else {
+                TextField(placeholder, text: $input)
+                    .font(Style.field)
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, Style.Space.lg).padding(.vertical, 12)
+                    .background(Capsule().fill(Style.paper))
+                    .overlay(Capsule().stroke(Style.rule, lineWidth: 1))
+                    .onSubmit(submit)
+            }
             if let error {
                 ErrorBanner(message: error)
             }
-            CirclePillButton(title: submitting ? "Creating…" : "Create",
+            CirclePillButton(title: submitting ? busyCta : cta,
                              filled: true, height: 50, action: submit)
-                .disabled(trimmed.isEmpty || submitting)
-                .opacity(trimmed.isEmpty || submitting ? 0.35 : 1)
+                .disabled(!ready || submitting)
+                .opacity(!ready || submitting ? 0.35 : 1)
         }
         .padding(Style.Space.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -459,16 +510,57 @@ private struct CreateCircleSheet: View {
     }
 
     private func submit() {
-        guard !trimmed.isEmpty, !submitting else { return }
+        guard ready, !submitting else { return }
         submitting = true
         error = nil
         Task {
             do {
-                try await onCreate(trimmed)
+                try await onSubmit(trimmed)
             } catch {
-                self.error = "Couldn't create your circle — \(error.localizedDescription)"
+                self.error = "\(errorPrefix) — \(error.localizedDescription)"
             }
             submitting = false
+        }
+    }
+}
+
+/// One box per character of a fixed-length code. A hidden text field holds the
+/// real input (so the system keyboard, paste, and deletion all just work); the
+/// boxes only render it, with the cursor's box outlined in ink.
+private struct CodeField: View {
+    let length: Int
+    @Binding var input: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        ZStack {
+            TextField("", text: $input)
+                .keyboardType(.asciiCapable)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .focused($focused)
+                .opacity(0)
+                .frame(width: 1, height: 1)
+            HStack(spacing: Style.Space.sm) {
+                ForEach(0..<length, id: \.self) { i in
+                    let chars = Array(input)
+                    Text(i < chars.count ? String(chars[i]) : " ")
+                        .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Style.ink)
+                        .frame(width: 44, height: 54)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Style.paper))
+                        .overlay(RoundedRectangle(cornerRadius: 10)
+                            .stroke(focused && i == chars.count ? Style.ink : Style.rule,
+                                    lineWidth: focused && i == chars.count ? 1.5 : 1))
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { focused = true }
+        }
+        .onAppear { focused = true }
+        .onChange(of: input) { _, new in
+            let cleaned = String(new.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(length))
+            if cleaned != new { input = cleaned }
         }
     }
 }
@@ -532,7 +624,8 @@ private struct FloatingBackdrop: View {
              followCredits: nil, circleSlots: nil, isVerified: nil, createdAt: nil)
     }
     let circle = { (name: String, memberNames: [String]) in
-        CircleSummary(circle: Circle(id: UUID(), name: name, createdBy: nil, createdAt: nil),
+        CircleSummary(circle: Circle(id: UUID(), name: name, createdBy: nil, createdAt: nil,
+                                     inviteCode: "ABC123"),
                       members: memberNames.map(user))
     }
     let db = DatabaseService()

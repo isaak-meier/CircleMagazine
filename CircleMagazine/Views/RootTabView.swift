@@ -15,8 +15,9 @@ struct RootTabView: View {
     @State private var tab: Tab = .feed
     @State private var composing = false
 
-    /// A circle being entered from the Circles tab: the chat sits beneath the
-    /// tab UI while the splash-style ripple reveals it from the tap point.
+    /// A circle being entered from the Circles tab: the circle screen sits
+    /// beneath the tab UI while the splash-style ripple reveals it from the
+    /// tap point. Currently the members roster — chat is parked for later.
     struct EnteredCircle {
         let summary: CircleSummary
         let tone: CircleBubbleLayout.BubbleTone
@@ -24,13 +25,19 @@ struct RootTabView: View {
     }
     @State private var entered: EnteredCircle?
     @State private var chatRevealed = false
+    /// The notifications placeholder's gag: true after the bait is taken.
+    @State private var eyebrowsRaised = false
+    /// Invite code from a circlemagazine://join?code=… deep link, handed to the
+    /// Circles tab which opens its join sheet prefilled.
+    @State private var pendingJoinCode: String?
 
-    enum Tab { case feed, circles, account }
+    enum Tab { case feed, circles, notifications, account }
 
     var body: some View {
         ZStack {
             if let entered, case .signedIn(let user) = account.authState {
-                CircleChatView(summary: entered.summary, tone: entered.tone, me: user) {
+                CircleMembersView(db: issueLoader.db, summary: entered.summary,
+                                  tone: entered.tone, me: user) {
                     self.entered = nil
                     chatRevealed = false
                 }
@@ -40,10 +47,24 @@ struct RootTabView: View {
             tabsAndNavBar
                 .opacity(chatRevealed ? 0 : 1)
                 .allowsHitTesting(!chatRevealed)
-                .rippleReveal(origin: entered?.origin) { chatRevealed = true }
+                // wave: false — the feed's webviews beneath can't take the
+                // Metal shader (they'd render as red boxes); hole-mask only.
+                .rippleReveal(origin: entered?.origin, wave: false) { chatRevealed = true }
         }
         .coordinateSpace(name: "root")
         .sheet(isPresented: $composing) { composeSheet }
+        // ponytail: URLs are dropped if this view isn't up yet (app cold-starts
+        // signed out) — stash the code at App level if that ever matters.
+        .onOpenURL { url in
+            guard url.scheme == "circlemagazine", url.host() == "join",
+                  let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                      .queryItems?.first(where: { $0.name == "code" })?.value
+            else { return }
+            entered = nil
+            chatRevealed = false
+            tab = .circles
+            pendingJoinCode = code
+        }
     }
 
     private var tabsAndNavBar: some View {
@@ -52,11 +73,14 @@ struct RootTabView: View {
                 CardFeedView(issueLoader: issueLoader)
                     .opacity(tab == .feed ? 1 : 0).allowsHitTesting(tab == .feed)
                 CirclesView(db: issueLoader.db, account: account,
-                            active: tab == .circles && entered == nil) { summary, tone, origin in
+                            active: tab == .circles && entered == nil,
+                            joinCode: $pendingJoinCode) { summary, tone, origin in
                     entered = EnteredCircle(summary: summary, tone: tone, origin: origin)
                 }
                     .opacity(tab == .circles ? 1 : 0).allowsHitTesting(tab == .circles)
-                AccountView(account: account)
+                notificationsPlaceholder
+                    .opacity(tab == .notifications ? 1 : 0).allowsHitTesting(tab == .notifications)
+                AccountView(account: account, issueLoader: issueLoader)
                     .opacity(tab == .account ? 1 : 0).allowsHitTesting(tab == .account)
             }
             navBar
@@ -105,6 +129,30 @@ struct RootTabView: View {
         return magazine.issue.id
     }
 
+    // ponytail: placeholder until notifications exist.
+    private var notificationsPlaceholder: some View {
+        VStack(spacing: 0) {
+            Masthead(title: "Notifications")
+            Spacer()
+            if eyebrowsRaised {
+                Text("🤨").font(.system(size: 90))
+            } else {
+                VStack(spacing: Style.Space.lg) {
+                    Image(systemName: "hammer")
+                        .font(.system(size: 34))
+                        .foregroundStyle(Style.meta)
+                    Text("Under construction...")
+                        .font(Style.body).foregroundStyle(Style.meta)
+                    Text("Tap for gay porn")
+                        .font(Style.eyebrow).foregroundStyle(Style.meta)
+                        .onTapGesture { eyebrowsRaised = true }
+                }
+            }
+            Spacer()
+        }
+        .background(Style.chrome)
+    }
+
     // MARK: Nav bar
 
     private var navBar: some View {
@@ -112,7 +160,7 @@ struct RootTabView: View {
             Button { tab = .feed } label: { navIcon("house.fill", active: tab == .feed) }
             Button { tab = .circles } label: { navIcon("circle.circle", active: tab == .circles) }
             Button { composing = true } label: { compose }
-            navIcon("bell")
+            Button { tab = .notifications } label: { navIcon("bell", active: tab == .notifications) }
             Button { tab = .account } label: { navIcon("person", active: tab == .account) }
         }
         .padding(.horizontal, Style.Space.xl)

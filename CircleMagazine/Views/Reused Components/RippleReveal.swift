@@ -11,15 +11,20 @@
 import SwiftUI
 
 extension View {
-    func rippleReveal(origin: CGPoint?, duration: TimeInterval = 1.2,
+    /// `wave: false` skips the Metal shader and keeps only the growing-hole
+    /// mask. Required when the content contains platform views (WKWebView
+    /// etc.) — layerEffect can't capture those and renders them as solid red.
+    func rippleReveal(origin: CGPoint?, duration: TimeInterval = 1.2, wave: Bool = true,
                       onFinished: @escaping () -> Void) -> some View {
-        modifier(RippleRevealModifier(origin: origin, duration: duration, onFinished: onFinished))
+        modifier(RippleRevealModifier(origin: origin, duration: duration, wave: wave,
+                                      onFinished: onFinished))
     }
 }
 
 struct RippleRevealModifier: ViewModifier {
     var origin: CGPoint?
     var duration: TimeInterval
+    var wave: Bool = true
     var onFinished: () -> Void
 
     @State private var holeRadius: CGFloat = 0
@@ -28,7 +33,7 @@ struct RippleRevealModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .keyframeAnimator(initialValue: 0.0, trigger: origin) { view, elapsedTime in
-                view.modifier(RippleModifier(origin: origin, elapsedTime: elapsedTime,
+                view.modifier(RippleModifier(origin: wave ? origin : nil, elapsedTime: elapsedTime,
                                              duration: duration))
             } keyframes: { _ in
                 LinearKeyframe(duration, duration: duration)

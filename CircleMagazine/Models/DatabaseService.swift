@@ -14,6 +14,11 @@ enum IssueError: LocalizedError {
   var errorDescription: String? { "Issues, pages, or pageMedia was empty" }
 }
 
+enum JoinError: LocalizedError {
+  case badCode
+  var errorDescription: String? { "No circle found with that invite code." }
+}
+
 @MainActor
 @Observable
 final class DatabaseService {
@@ -46,13 +51,14 @@ final class DatabaseService {
     }
   }
 
-  /// The current live issue with its pages (ordered) and each page's widgets
-  /// (ordered by position). Returns nil when no issue is live.
+  /// The current issue with its pages (ordered) and each page's widgets
+  /// (ordered by position). `live: false` fetches the newest draft instead —
+  /// the Account screen's edition-preview toggle.
   /// could be optimzed for multiple async server calls TODO
-  func fetchCurrentIssue() async throws -> Magazine {
+  func fetchCurrentIssue(live: Bool = true) async throws -> Magazine {
 
     let issues: [Issue] = try await supabase.from("issues")
-      .select().eq("is_live", value: true)
+      .select().eq("is_live", value: live)
       .order("created_at", ascending: false).limit(1).execute().value
     guard let issue = issues.first else { throw IssueError.emptyData }
 
@@ -81,10 +87,10 @@ final class DatabaseService {
     return Magazine(issue: issue, pages: result)
   }
 
-  /// Cheap staleness probe — just the live issue's id, no pages/media.
-  func currentIssueId() async throws -> UUID? {
+  /// Cheap staleness probe — just the issue's id, no pages/media.
+  func currentIssueId(live: Bool = true) async throws -> UUID? {
     let issues: [Issue] = try await supabase.from("issues")
-      .select().eq("is_live", value: true)
+      .select().eq("is_live", value: live)
       .order("created_at", ascending: false).limit(1).execute().value
     return issues.first?.id
   }
@@ -152,6 +158,40 @@ final class DatabaseService {
             .execute()
 
         return circle
+    }
+
+    /// The subset of `memberIds` who have submitted a page to the current live
+    /// issue. Empty when no issue is live.
+    func submitterIds(among memberIds: [UUID]) async throws -> Set<UUID> {
+        guard let issueId = try await currentIssueId() else { return [] }
+        struct Row: Decodable {
+            let submittedBy: UUID?
+            enum CodingKeys: String, CodingKey { case submittedBy = "submitted_by" }
+        }
+        let rows: [Row] = try await supabase.from("pages")
+            .select("submitted_by").eq("issue_id", value: issueId.uuidString)
+            .in("submitted_by", values: memberIds.map(\.uuidString)).execute().value
+        return Set(rows.compactMap(\.submittedBy))
+    }
+
+    /// Joins the circle behind an invite code and returns it with its full
+    /// member list, ready for the bubble field. Joining a circle you're
+    /// already in is a no-op success.
+    func joinCircle(code: String, userId: UUID) async throws -> CircleSummary {
+        let circles: [Circle] = try await supabase.from("circles")
+            .select().eq("invite_code", value: code.uppercased()).limit(1).execute().value
+        guard let circle = circles.first else { throw JoinError.badCode }
+
+        try await supabase.from("circle_members")
+            .upsert(CircleMember(circleId: circle.id, userId: userId, joinedAt: Date()),
+                    ignoreDuplicates: true)
+            .execute()
+
+        let members: [CircleMember] = try await supabase.from("circle_members")
+            .select().eq("circle_id", value: circle.id.uuidString).execute().value
+        let users: [User] = try await supabase.from("users")
+            .select().in("id", values: members.map(\.userId.uuidString)).execute().value
+        return CircleSummary(circle: circle, members: users)
     }
 }
 

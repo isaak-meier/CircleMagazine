@@ -17,12 +17,14 @@ struct Circle: Codable {
     let name: String?
     let createdBy: UUID?
     let createdAt: Date?
+    let inviteCode: String
 
     enum CodingKeys: String, CodingKey {
         case id
         case name
         case createdBy = "created_by"
         case createdAt = "created_at"
+        case inviteCode = "invite_code"
     }
 }
 
