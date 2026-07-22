@@ -9,13 +9,29 @@ import AVKit
 
 struct CardView: View {
     let viewModel: CardViewModel
+    /// Comments are interactive only when the feed passes the service + viewer.
+    /// Nil in the compose preview, where the bar is a static mockup.
+    var db: DatabaseService? = nil
+    var me: User? = nil
+
+    @State private var showComments = false
+
+    private var commentsEnabled: Bool { db != nil && me != nil }
 
     var body: some View {
-        content
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(Style.paper)
-            .clipShape(RoundedRectangle(cornerRadius: Style.cardRadius))
-            .shadow(color: .black.opacity(0.13), radius: 16, y: 4)
+        VStack(spacing: 0) {
+            content
+            CommentBar(action: commentsEnabled ? { showComments = true } : nil)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Style.paper)
+        .clipShape(RoundedRectangle(cornerRadius: Style.cardRadius))
+        .shadow(color: .black.opacity(0.18), radius: 20, y: 6)
+        .sheet(isPresented: $showComments) {
+            if let db, let me {
+                CommentsView(db: db, pageId: viewModel.id, me: me)
+            }
+        }
     }
 
     @ViewBuilder
@@ -69,6 +85,40 @@ private struct AuthorRow: View {
                         .foregroundStyle(Style.meta))
             }
             .frame(width: 32, height: 32).clipShape(SwiftUI.Circle())
+    }
+}
+
+// MARK: - Comment bar
+
+// The "Add a comment…" pill that closes every card (design 1a–1d). Sits below
+// whatever content the card rendered, so image and video cards share it.
+private struct CommentBar: View {
+    /// Tap handler — nil renders a static (non-interactive) bar, e.g. in previews.
+    var action: (() -> Void)?
+
+    var body: some View {
+        if let action {
+            Button(action: action) { pill }.buttonStyle(.plain)
+        } else {
+            pill
+        }
+    }
+
+    private var pill: some View {
+        HStack(spacing: 11) {
+            SwiftUI.Circle().fill(Style.rule)
+                .frame(width: 26, height: 26)
+                .overlay(Image(systemName: "person.fill")
+                    .font(.system(size: 11)).foregroundStyle(Style.meta))
+            Text("Add a comment…")
+                .font(.system(size: 14)).foregroundStyle(Color(hex: 0xA8A39C))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .background(.white, in: RoundedRectangle(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 13).stroke(Style.rule, lineWidth: 1))
+        .padding(.horizontal, Style.Space.lg)
+        .padding(.top, 14).padding(.bottom, Style.Space.lg)
     }
 }
 

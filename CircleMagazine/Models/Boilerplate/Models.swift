@@ -28,6 +28,30 @@ struct Circle: Codable {
     }
 }
 
+struct Comment: Codable, Identifiable {
+    let id: UUID
+    let pageId: UUID
+    let userId: UUID
+    let body: String
+    let createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case pageId = "page_id"
+        case userId = "user_id"
+        case body
+        case createdAt = "created_at"
+    }
+}
+
+/// A comment paired with its author for display (author nil if the user row
+/// couldn't be fetched).
+struct CommentWithAuthor: Identifiable {
+    let comment: Comment
+    let author: User?
+    var id: UUID { comment.id }
+}
+
 struct Engagement: Codable {
     let id: UUID
     let userId: UUID?

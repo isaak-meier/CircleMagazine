@@ -33,6 +33,18 @@ struct CircleInsert: Encodable {
     }
 }
 
+struct CommentInsert: Encodable {
+    let pageId: UUID
+    let userId: UUID
+    let body: String
+
+    enum CodingKeys: String, CodingKey {
+        case pageId = "page_id"
+        case userId = "user_id"
+        case body
+    }
+}
+
 struct PageMediaInsert: Encodable {
     let pageId: UUID
     let mediaUrl: String?

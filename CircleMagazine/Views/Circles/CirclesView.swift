@@ -108,6 +108,13 @@ final class BubblePhysics {
         lastTick = nil
     }
 
+    /// Confine the field to the visible viewport (no scrolling) so bubbles
+    /// bounce off the real screen edges. Called with the design-space height.
+    func fit(designHeight h: CGFloat) {
+        guard h > 0, bounds.height != h else { return }
+        bounds.height = h
+    }
+
     func tick(to now: Date) {
         // Clamp dt so returning from a pause doesn't teleport bubbles.
         let dt = min(now.timeIntervalSince(lastTick ?? now), 1.0 / 30.0)
@@ -155,6 +162,17 @@ final class BubblePhysics {
             b.vel.dx += (vbn2 - vbn) * nx; b.vel.dy += (vbn2 - vbn) * ny
         }
         bodies[i] = a; bodies[j] = b
+    }
+
+    /// Slingshot release: the bubble was dragged by `pull` (design-space), so
+    /// it sits at the stretched position — launch it the opposite way with force
+    /// equal to the stretch, and it bounces around off the walls from there.
+    /// ponytail: `launch` is the spring constant — bump it for a springier fling.
+    func slingshot(_ index: Int, pull: CGVector, launch k: CGFloat = 6) {
+        guard bodies.indices.contains(index) else { return }
+        bodies[index].pos.x += pull.dx
+        bodies[index].pos.y += pull.dy
+        bodies[index].vel = CGVector(dx: -pull.dx * k, dy: -pull.dy * k)
     }
 
     private func bounceOffWalls(_ i: Int) {
@@ -295,27 +313,25 @@ struct CirclesView: View {
         physics.sync(count: ranked.count)
         return GeometryReader { geo in
             let scale = geo.size.width / CircleBubbleLayout.designWidth
-            ScrollView {
-                TimelineView(.animation(minimumInterval: nil, paused: !active)) { timeline in
-                    let _ = physics.tick(to: timeline.date)
-                    ZStack(alignment: .topLeading) {
-                        ForEach(Array(ranked.enumerated()), id: \.element.id) { i, summary in
-                            let slot = CircleBubbleLayout.slot(i)
-                            CircleBubble(summary: summary, slot: slot, scale: scale,
-                                         center: physics.bodies[i].pos) { tapPoint in
-                                onEnter(summary, slot.tone, tapPoint)
-                            }
-                        }
+            // No ScrollView: the bubbles bounce within the visible screen.
+            let _ = physics.fit(designHeight: geo.size.height / scale)
+            TimelineView(.animation(minimumInterval: nil, paused: !active)) { timeline in
+                let _ = physics.tick(to: timeline.date)
+                ZStack(alignment: .topLeading) {
+                    ForEach(Array(ranked.enumerated()), id: \.element.id) { i, summary in
+                        let slot = CircleBubbleLayout.slot(i)
+                        CircleBubble(summary: summary, slot: slot, scale: scale,
+                                     center: physics.bodies[i].pos,
+                                     onTap: { tapPoint in onEnter(summary, slot.tone, tapPoint) },
+                                     onLaunch: { pull in physics.slingshot(i, pull: pull) })
                     }
-                    .frame(width: geo.size.width,
-                           height: physics.bounds.height * scale,
-                           alignment: .topLeading)
                 }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             }
-            .scrollIndicators(.hidden)
         }
     }
 
+    @MainActor
     private func load() async {
         guard case .loading = state else { return }  // preview injected data
         guard case .signedIn(let user) = account.authState else {
@@ -331,6 +347,7 @@ struct CirclesView: View {
 
     /// Creates the circle and grows a new bubble for it in place. Throws so the
     /// sheet can show the failure and keep the typed name for a retry.
+    @MainActor
     private func create(named name: String) async throws {
         guard case .signedIn(let user) = account.authState else { return }
         let circle = try await db.createCircle(name: name, creatorID: user.id)
@@ -342,6 +359,7 @@ struct CirclesView: View {
 
     /// Joins via invite code and grows the circle's bubble in place. Throws so
     /// the sheet can show the failure (bad code, network) and keep the input.
+    @MainActor
     private func join(code: String) async throws {
         guard case .signedIn(let user) = account.authState else { return }
         let summary = try await db.joinCircle(code: code, userId: user.id)
@@ -386,6 +404,13 @@ private struct CircleBubble: View {
     /// Called with the tap point in the "root" coordinate space, so the
     /// ripple into the chat radiates from the finger.
     let onTap: (CGPoint) -> Void
+    /// Slingshot release: the drag pull in design space (screen ÷ scale). The
+    /// field converts this into an opposite-direction launch on the physics body.
+    let onLaunch: (CGVector) -> Void
+
+    /// Live drag translation (screen space) while stretching the spring; resets
+    /// to zero on release, when the launch takes over.
+    @GestureState private var drag: CGSize = .zero
 
     var body: some View {
         let d = slot.diameter * scale
@@ -411,7 +436,18 @@ private struct CircleBubble: View {
         .onTapGesture(coordinateSpace: .named("root")) { location in
             onTap(location)
         }
+        // Drag to stretch the spring; release to fling it the opposite way.
+        // minimumDistance keeps small touches as taps (which open the circle).
+        .gesture(
+            DragGesture(minimumDistance: 10)
+                .updating($drag) { value, state, _ in state = value.translation }
+                .onEnded { value in
+                    onLaunch(CGVector(dx: value.translation.width / scale,
+                                      dy: value.translation.height / scale))
+                }
+        )
         .position(x: center.x * scale, y: center.y * scale)
+        .offset(x: drag.width, y: drag.height)
         .zIndex(slot.diameter)  // bigger bubbles float above smaller neighbors
     }
 }
@@ -457,7 +493,11 @@ private struct CircleFormSheet: View {
     let busyCta: String
     let errorPrefix: String
     var codeLength: Int? = nil
-    let onSubmit: (String) async throws -> Void
+    // @MainActor-pinned: without it, Swift 5 mode lets this @Sendable async
+    // closure run off the main actor, racing the reference counts of the
+    // captured view/model on a background thread — a use-after-free that
+    // faults in swift_retain (crash on createCircle's insert).
+    let onSubmit: @MainActor (String) async throws -> Void
 
     @State private var input: String
     @State private var submitting = false
@@ -509,11 +549,12 @@ private struct CircleFormSheet: View {
         .presentationDetents([.medium])
     }
 
+    @MainActor
     private func submit() {
         guard ready, !submitting else { return }
         submitting = true
         error = nil
-        Task {
+        Task { @MainActor in
             do {
                 try await onSubmit(trimmed)
             } catch {

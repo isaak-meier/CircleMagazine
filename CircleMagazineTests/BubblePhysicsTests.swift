@@ -28,6 +28,20 @@ struct BubblePhysicsTests {
         #expect(b.vel.dx == 10)
     }
 
+    @Test func slingshotLaunchesOppositeWithEqualForce() {
+        let p = BubblePhysics()
+        p.sync(count: 1)
+        p.bodies = [.init(pos: CGPoint(x: 100, y: 300), vel: CGVector(dx: 0, dy: 0), radius: 40)]
+        p.slingshot(0, pull: CGVector(dx: 30, dy: -20), launch: 6)
+
+        // Bubble sits at the stretched (pulled) position…
+        #expect(p.bodies[0].pos.x == 130)
+        #expect(p.bodies[0].pos.y == 280)
+        // …and launches the opposite way, force proportional to the stretch.
+        #expect(p.bodies[0].vel.dx == -180)   // -30 * 6
+        #expect(p.bodies[0].vel.dy == 120)    //  20 * 6
+    }
+
     @Test func wallsKeepBubblesInBounds() {
         let p = BubblePhysics()
         p.sync(count: 1)  // bounds = 390 x 600

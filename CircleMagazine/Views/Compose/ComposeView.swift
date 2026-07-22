@@ -10,6 +10,9 @@
 
 import SwiftUI
 import UIKit   // UIPasteboard
+import os
+
+private let log = Logger(subsystem: "CircleMagazine", category: "compose")
 
 @Observable @MainActor
 final class ComposeModel {
@@ -31,7 +34,13 @@ final class ComposeModel {
     private(set) var errorText: String?
 
     private let db: DatabaseService
-    private let issueId: UUID?
+    /// The live edition to post into. The feed provides it when loaded; when it
+    /// couldn't (feed error), post() asks the DB directly rather than staying dead.
+    private var issueId: UUID?
+    private(set) var resolveTask: Task<Void, Never>?   // exposed so tests can await it
+    /// Stamps each resolve pass; a pass only touches state while its stamp is
+    /// current, so cancelled/superseded passes can't strand the spinner.
+    private var resolveGeneration = 0
     let author: User
 
     init(db: DatabaseService, issueId: UUID?, author: User) {
@@ -40,25 +49,62 @@ final class ComposeModel {
         self.author = author
     }
 
-    var canPost: Bool { resolved != nil && issueId != nil && phase == .editing }
+    var canPost: Bool { resolved != nil && phase == .editing }
+
+    /// Kick off `resolve`, replacing any fetch already in flight.
+    func startResolving() {
+        if resolveTask != nil { log.info("startResolving: superseding in-flight fetch") }
+        resolveTask?.cancel()
+        resolveGeneration += 1
+        let generation = resolveGeneration
+        resolveTask = Task { await resolve(generation: generation) }
+    }
+
+    /// Abort an in-flight fetch (Cancel button) so its result can't land later.
+    func cancelResolving() {
+        log.info("cancelResolving")
+        resolveTask?.cancel()
+        resolveTask = nil
+        resolveGeneration += 1   // orphan any pass already running (or yet to run)
+        isResolving = false
+    }
 
     /// Parse the pasted link and, for YouTube, pull the title for the live preview.
-    func resolve() async {
+    private func resolve(generation: Int) async {
+        guard generation == resolveGeneration else { return }   // cancelled before we began
         let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
+        log.info("resolve start: '\(trimmed, privacy: .public)'")
         guard let url = URL(string: trimmed), let source = VideoSource(url), !isRawFile(source) else {
+            log.info("resolve exit: unparseable link")
             resolved = nil
+            isResolving = false
             errorText = "Paste a YouTube or Instagram link."
             return
         }
         errorText = nil
         isResolving = true
         var title: String?
-        if case .youtube(let id) = source {
-            title = await YouTubeOEmbed.title(forVideoID: id)   // Instagram has no keyless title lookup.
+        if case .youtube(let id) = source {   // Instagram has no keyless lookup, so no dead-link check either.
+            let began = Date()
+            let lookup = await YouTubeOEmbed.lookup(forVideoID: id)
+            log.info("resolve: oEmbed took \(Date().timeIntervalSince(began), format: .fixed(precision: 1))s → \(String(describing: lookup), privacy: .public)")
+            guard generation == resolveGeneration else {
+                log.info("resolve exit: cancelled/superseded mid-fetch")
+                return   // canceller or successor owns the state now
+            }
+            switch lookup {
+            case .found(let t): title = t
+            case .unavailable:
+                isResolving = false
+                errorText = "That video looks private or removed — check the link."
+                return
+            case .unknown: break   // can't tell; post without a title rather than block
+            }
         }
         resolved = Resolved(videoURL: url, source: source, title: title,
                             shape: CardShape(mediaURL: url))
         isResolving = false
+        log.info("resolve exit: resolved, title=\(title ?? "nil", privacy: .public)")
     }
 
     private func isRawFile(_ source: VideoSource) -> Bool {
@@ -73,12 +119,17 @@ final class ComposeModel {
     }
 
     func post() async {
-        guard let resolved, let issueId else {
-            errorText = "No live edition to post to yet — try again in a moment."
-            return
-        }
+        guard let resolved, phase == .editing else { return }
         phase = .posting
         errorText = nil
+        if issueId == nil {   // feed never loaded — ask the DB for the edition directly
+            issueId = try? await db.currentIssueId()
+        }
+        guard let issueId else {
+            errorText = "No live edition to post to yet — try again in a moment."
+            phase = .editing
+            return
+        }
         do {
             try await db.createVideoPost(
                 issueId: issueId, authorId: author.id,
@@ -95,13 +146,23 @@ final class ComposeModel {
 
 struct ComposeView: View {
     @State private var model: ComposeModel
+    /// True when the clipboard holds something that looks like a link, learned
+    /// via detectPatterns — metadata only, so it never triggers the paste prompt.
+    @State private var clipboardHasURL = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     /// Called when the post lands, so the feed can refresh to include it.
     let onPosted: () async -> Void
 
     init(db: DatabaseService, issueId: UUID?, author: User,
          onPosted: @escaping () async -> Void) {
         _model = State(initialValue: ComposeModel(db: db, issueId: issueId, author: author))
+        self.onPosted = onPosted
+    }
+
+    /// Canvas previews inject a pre-staged model to land on a specific step.
+    fileprivate init(model: ComposeModel, onPosted: @escaping () async -> Void) {
+        _model = State(initialValue: model)
         self.onPosted = onPosted
     }
 
@@ -137,7 +198,7 @@ struct ComposeView: View {
 
     private var header: some View {
         HStack {
-            Button("Cancel") { dismiss() }
+            Button("Cancel") { model.cancelResolving(); dismiss() }
                 .font(.system(size: 14)).foregroundStyle(Style.meta)
             Spacer()
             Text("COMPOSE").font(Style.eyebrow).tracking(1.8).foregroundStyle(faint)
@@ -177,30 +238,81 @@ struct ComposeView: View {
 
             typePills.padding(.vertical, 18)
 
+            // Plain field: iOS's own edit-menu Paste handles manual pasting with
+            // no permission prompt. The suggestion chip below is the fast path.
             HStack(spacing: 11) {
                 Image(systemName: "link").font(.system(size: 15)).foregroundStyle(Color(hex: 0xB4AFA8))
                 TextField("Paste a YouTube or Instagram link", text: $model.linkText)
                     .font(.system(size: 13.5))
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .keyboardType(.URL)
-                    .onSubmit { Task { await model.resolve() } }
-                Button("Paste") {
-                    if let s = UIPasteboard.general.string {
-                        model.linkText = s
-                        Task { await model.resolve() }
-                    }
-                }
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(Style.ink)
-                .padding(.horizontal, 13).padding(.vertical, 5)
-                .overlay(Capsule().stroke(Style.ink, lineWidth: 1))
+                    .onSubmit { model.startResolving() }
             }
             .padding(14)
             .background(.white, in: RoundedRectangle(cornerRadius: 13))
             .overlay(RoundedRectangle(cornerRadius: 13).stroke(Style.rule, lineWidth: 1))
 
+            // Field has text (typed or hand-pasted) → a Continue button to
+            // proceed. Empty field but a link on the clipboard → the paste chip.
+            if !model.linkText.trimmingCharacters(in: .whitespaces).isEmpty {
+                continueButton.padding(.top, 11)
+            } else if clipboardHasURL {
+                pasteSuggestion.padding(.top, 11)
+            }
+
             footnote.padding(.top, 11)
         }
         .padding(.horizontal, Style.Space.xl).padding(.top, 20)
+        .task { await detectClipboardURL() }
+        .onChange(of: scenePhase) { _, phase in
+            // Re-check after the user copies a link in another app and returns.
+            if phase == .active { Task { await detectClipboardURL() } }
+        }
+    }
+
+    // Shown only when detectPatterns says the clipboard holds a link. Styled
+    // like the app's other capsule buttons (see the "Link" type pill). The read
+    // uses iOS's standard paste path — the system shows its own "Allow Paste?"
+    // prompt; nil means the user declined, so we just no-op.
+    private var pasteSuggestion: some View {
+        Button {
+            if let s = UIPasteboard.general.string {
+                model.linkText = s
+                model.startResolving()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "link").font(.system(size: 11, weight: .semibold))
+                Text("Use copied link")
+            }
+            .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Style.paper)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(Style.ink, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Advances a link that's already in the field (typed or hand-pasted) into
+    // the preview — the manual-entry counterpart to the paste chip.
+    private var continueButton: some View {
+        Button { model.startResolving() } label: {
+            HStack(spacing: 6) {
+                Text("Continue")
+                Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
+            }
+            .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Style.paper)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(Style.ink, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Metadata-only clipboard probe: does it hold a probable URL? Never reads
+    /// the value, so no paste prompt.
+    @MainActor
+    private func detectClipboardURL() async {
+        let found = (try? await UIPasteboard.general.detectedPatterns(for: [\.probableWebURL])) ?? []
+        clipboardHasURL = found.contains(\.probableWebURL)
     }
 
     @ViewBuilder
@@ -277,18 +389,17 @@ struct ComposeView: View {
                     title: resolved.title,
                     caption: model.caption.isEmpty ? nil : model.caption,
                     captionStyle: model.captionStyle, cardShape: resolved.shape))
-                    .feedCardFrame()   // feed-size card, inferred from the sheet's width
+                    // Fixed height, NOT .feedCardFrame(): its containerRelativeFrame
+                    // sizing feeds back against keyboard avoidance in this sheet's
+                    // ScrollView and locks the main thread in a layout loop.
+                    .frame(height: previewHeight(resolved.shape))
                     .allowsHitTesting(false)
+                    // The comment field lives in the card's leftover paper area at
+                    // the bottom — a white bordered pill, per the compose design.
+                    .overlay(alignment: .bottom) { noteField }
 
                 sectionLabel("Caption style").padding(.top, 22).padding(.bottom, 11)
                 stylePicker
-
-                sectionLabel("Your note").padding(.top, 22).padding(.bottom, 12)
-                HStack(alignment: .top, spacing: 11) {
-                    avatar(model.author, size: 30)
-                    TextField("Add a note…", text: $model.caption, axis: .vertical)
-                        .font(.system(size: 14)).foregroundStyle(Color(hex: 0x2A2826))
-                }
 
                 Rectangle().fill(hairline).frame(height: 1).padding(.vertical, 18)
 
@@ -301,6 +412,29 @@ struct ComposeView: View {
             }
             .padding(.horizontal, Style.Space.lg).padding(.top, 18)
         }
+    }
+
+    /// Card height per shape so media + plate + note fill it without a void:
+    /// wide stacks a 16:9 region and the plate, square is taller, and tall is
+    /// full-bleed media (the note overlays the media bottom there).
+    private func previewHeight(_ shape: CardShape) -> CGFloat {
+        switch shape {
+        case .wide:   400
+        case .square: 530
+        case .tall:   440
+        }
+    }
+
+    private var noteField: some View {
+        HStack(spacing: 11) {
+            avatar(model.author, size: 26)
+            TextField("Add a comment…", text: $model.caption, axis: .vertical)
+                .font(.system(size: 14)).foregroundStyle(Color(hex: 0x2A2826))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .background(.white, in: RoundedRectangle(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 13).stroke(Style.rule, lineWidth: 1))
+        .padding(.horizontal, 16).padding(.bottom, 16)
     }
 
     private func linkedChip(_ resolved: ComposeModel.Resolved) -> some View {
@@ -405,3 +539,35 @@ struct ComposeView: View {
                 .foregroundStyle(Color(hex: 0x6B6862)))
     }
 }
+
+#if DEBUG
+extension ComposeModel {
+    /// Jump straight to the compose step for canvas previews — no network.
+    fileprivate func previewResolved(url: String, title: String?) {
+        guard let u = URL(string: url), let source = VideoSource(u) else { return }
+        resolved = Resolved(videoURL: u, source: source, title: title,
+                            shape: CardShape(mediaURL: u))
+    }
+
+    fileprivate func previewMarkPosted() { phase = .posted }
+}
+
+
+
+#Preview("Compose step — note in card") {
+    let model = ComposeModel(db: DatabaseService(), issueId: nil,
+                             author: Magazine.sample.pages[0].author!)
+    model.previewResolved(url: "https://www.youtube.com/watch?v=62bIsvRcPv0",
+                          title: "I Spent 3 Weeks Living Off-Grid in the Mountains")
+    return ComposeView(model: model) {}
+}
+
+#Preview("Confirmation") {
+    let model = ComposeModel(db: DatabaseService(), issueId: nil,
+                             author: Magazine.sample.pages[0].author!)
+    model.previewResolved(url: "https://www.youtube.com/watch?v=62bIsvRcPv0",
+                          title: "I Spent 3 Weeks Living Off-Grid in the Mountains")
+    return ComposeView(model: model) {}
+        .onAppear { model.previewMarkPosted() }
+}
+#endif

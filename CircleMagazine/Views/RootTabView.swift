@@ -70,7 +70,7 @@ struct RootTabView: View {
     private var tabsAndNavBar: some View {
         VStack(spacing: 0) {
             ZStack {
-                CardFeedView(issueLoader: issueLoader)
+                CardFeedView(issueLoader: issueLoader, me: signedInUser)
                     .opacity(tab == .feed ? 1 : 0).allowsHitTesting(tab == .feed)
                 CirclesView(db: issueLoader.db, account: account,
                             active: tab == .circles && entered == nil,
@@ -122,6 +122,11 @@ struct RootTabView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Style.paper)
         .presentationDetents([.medium])
+    }
+
+    private var signedInUser: User? {
+        if case .signedIn(let user) = account.authState { return user }
+        return nil
     }
 
     private var liveIssueId: UUID? {

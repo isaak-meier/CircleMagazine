@@ -40,16 +40,24 @@ struct VideoCard: View {
     // MARK: Layouts
 
     // 1a / 1c / 1d — fixed-height media on top, a caption plate underneath.
+    // The plate carries the author chip, so it renders even with no title.
     private var platedCard: some View {
         VStack(spacing: 0) {
             mediaRegion(scrim: topScrim)
-            if displayTitle != nil { plate }
+            if displayTitle != nil || author != nil { plate }
         }
     }
 
-    // 1b — full-bleed media with the title floating over the bottom.
+    // 1b — full-bleed media with the title floating over the bottom. No plate,
+    // so the author chip stays overlaid on the media here.
     private var immersiveCard: some View {
         mediaRegion(scrim: immersiveScrim) {
+            if let author {
+                authorChip(author, tint: .white)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+            }
             if let displayTitle {
                 VStack(alignment: .leading, spacing: 9) {
                     kicker(markSize: 18, color: .white.opacity(0.85))
@@ -81,13 +89,6 @@ struct VideoCard: View {
             handle
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .allowsHitTesting(false)
-
-            if let author {
-                authorChip(author)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .allowsHitTesting(false)
-            }
 
             overlay()
         }
@@ -150,12 +151,15 @@ struct VideoCard: View {
         }
     }
 
-    // 1a — cream plate, black top rule, source mark + serif title.
+    // 1a — cream plate, black top rule, source mark + serif title, author below.
     private var paperPlate: some View {
-        HStack(spacing: 12) {
-            sourceMark(size: 26)
-            plateTitle(color: Style.ink)
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                sourceMark(size: 26)
+                plateTitle(color: Style.ink)
+                Spacer(minLength: 0)
+            }
+            if let author { authorChip(author, tint: Style.ink) }
         }
         .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 15)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,11 +167,12 @@ struct VideoCard: View {
         .overlay(alignment: .top) { Rectangle().fill(Style.ink).frame(height: 2) }
     }
 
-    // 1c — navy plate, mono kicker, cream serif title.
+    // 1c — navy plate, mono kicker, cream serif title, author below.
     private var inkBandPlate: some View {
         VStack(alignment: .leading, spacing: 8) {
             kicker(markSize: 17, color: Color(hex: 0x9A9AC0))
             plateTitle(color: Style.paper)
+            if let author { authorChip(author, tint: .white).padding(.top, 4) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 16)
@@ -181,6 +186,7 @@ struct VideoCard: View {
             VStack(alignment: .leading, spacing: 7) {
                 monoKicker("Video · \(author?.username ?? "Circle")", color: Style.meta)
                 plateTitle(color: Style.ink)
+                if let author { authorChip(author, tint: Style.ink).padding(.top, 3) }
             }
             Spacer(minLength: 0)
         }
@@ -204,18 +210,19 @@ struct VideoCard: View {
             .padding(.top, 10)
     }
 
-    // Author identity over the top of the media: avatar + name + caption subtitle.
-    private func authorChip(_ author: User) -> some View {
+    // Author identity: avatar + name + caption subtitle. Tint is .white over
+    // media / the navy plate, Style.ink on the cream plates.
+    private func authorChip(_ author: User, tint: Color) -> some View {
         HStack(spacing: 9) {
-            SwiftUI.Circle().fill(.white.opacity(0.18))
+            SwiftUI.Circle().fill(tint.opacity(0.18))
                 .frame(width: 30, height: 30)
-                .overlay(SwiftUI.Circle().stroke(.white.opacity(0.45), lineWidth: 1))
-                .overlay(Text(author.username.prefix(1)).font(Style.byline).foregroundStyle(.white))
+                .overlay(SwiftUI.Circle().stroke(tint.opacity(0.45), lineWidth: 1))
+                .overlay(Text(author.username.prefix(1)).font(Style.byline).foregroundStyle(tint))
             VStack(alignment: .leading, spacing: 1) {
-                Text(author.username).font(Style.byline).foregroundStyle(.white)
+                Text(author.username).font(Style.byline).foregroundStyle(tint)
                 if let caption {
                     Text(caption)
-                        .font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.82))
+                        .font(.system(size: 10.5)).foregroundStyle(tint.opacity(0.82))
                         .lineLimit(1)
                 }
             }

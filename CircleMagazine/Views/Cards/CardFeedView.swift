@@ -11,6 +11,9 @@ import SwiftUI
 
 struct CardFeedView: View {
     let issueLoader: IssueLoader
+    /// The signed-in viewer, so cards can open the comments sheet. Nil in
+    /// previews / signed-out, where comment bars stay static.
+    var me: User? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,6 +24,8 @@ struct CardFeedView: View {
                     Text("Retrieving latest issue...")
                     ProgressView()
                     Spacer()
+                case .loaded(let magazine) where magazine.cards.isEmpty:
+                    emptyEdition
                 case .loaded(let magazine):
                     ContributorsRow(contributors: magazine.contributors)
                     viewport(for: magazine)
@@ -49,6 +54,28 @@ struct CardFeedView: View {
         .task { await issueLoader.refreshIfNeeded() }
     }
 
+    // A live-or-draft edition that exists but has no posts yet. Distinct from
+    // the failure state — nothing went wrong, it's just waiting to be filled.
+    private var emptyEdition: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            VStack(spacing: Style.Space.md) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 32))
+                    .foregroundStyle(Style.meta)
+                Text("Nothing here yet.")
+                    .font(Style.cardTitle)
+                    .foregroundStyle(Style.ink)
+                Text("This edition is still being written. Tap ＋ to add the first piece.")
+                    .font(Style.body)
+                    .foregroundStyle(Style.meta)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, Style.Space.xl)
+            Spacer()
+        }
+    }
+
     // The live issue's date once loaded; nil (no stamp) while loading/failed.
     private var editionDate: String? {
         guard case .loaded(let magazine) = issueLoader.loadState else { return nil }
@@ -63,7 +90,7 @@ struct CardFeedView: View {
         return ScrollView(.vertical) {
             LazyVStack(spacing: Style.Space.sm) {
                 ForEach(magazine.cards) { cardViewModel in
-                    CardView(viewModel: cardViewModel)
+                    CardView(viewModel: cardViewModel, db: issueLoader.db, me: me)
                         .feedCardFrame()
                 }
             }

@@ -8,6 +8,9 @@
 import Foundation
 import Observation
 import Supabase
+import os
+
+private let oembedLog = Logger(subsystem: "CircleMagazine", category: "oembed")
 
 enum IssueError: LocalizedError {
   case emptyData
@@ -21,7 +24,7 @@ enum JoinError: LocalizedError {
 
 @MainActor
 @Observable
-final class DatabaseService {
+class DatabaseService {   // not final: tests subclass it to spy on writes
   let supabase = SupabaseClient(
     supabaseURL: Config.supabaseURL,
     supabaseKey: Config.supabaseAnonKey
@@ -65,14 +68,17 @@ final class DatabaseService {
     let pages: [Page] = try await supabase.from("pages")
       .select().eq("issue_id", value: issue.id.uuidString)
       .order("created_at", ascending: true).execute().value
-    guard !pages.isEmpty else { throw IssueError.emptyData }
+    // An issue with no pages yet is a valid empty edition (a draft before
+    // anyone posts), not an error — hand it back so the feed shows its empty
+    // state rather than the "something went wrong" screen.
+    guard !pages.isEmpty else { return Magazine(issue: issue, pages: []) }
 
-    // One round trip for all media, then group in memory
+    // One round trip for all media, then group in memory. A page without media
+    // just renders its fallback, so empty media is fine — no guard.
     let pageIds = pages.map(\.id.uuidString)
     let media: [PageMedia] = try await supabase.from("page_media")
       .select().in("page_id", values: pageIds)
       .order("position", ascending: true).execute().value
-    guard !media.isEmpty else { throw IssueError.emptyData }
     let byPage = Dictionary(grouping: media, by: \.pageId)
 
     // Authors — one round trip for every page's submitter, keyed by id.
@@ -146,6 +152,27 @@ final class DatabaseService {
     return page
   }
 
+  /// A page's comments, oldest first, each paired with its author (one extra
+  /// round trip for the distinct authors, joined in memory).
+  func fetchComments(pageId: UUID) async throws -> [CommentWithAuthor] {
+    let comments: [Comment] = try await supabase.from("comments")
+      .select().eq("page_id", value: pageId.uuidString)
+      .order("created_at", ascending: true).execute().value
+    guard !comments.isEmpty else { return [] }
+
+    let authorIds = Array(Set(comments.map(\.userId.uuidString)))
+    let authors: [User] = try await supabase.from("users")
+      .select().in("id", values: authorIds).execute().value
+    let byId = Dictionary(uniqueKeysWithValues: authors.map { ($0.id, $0) })
+    return comments.map { CommentWithAuthor(comment: $0, author: byId[$0.userId]) }
+  }
+
+  func postComment(pageId: UUID, userId: UUID, body: String) async throws -> Comment {
+    try await supabase.from("comments")
+      .insert(CommentInsert(pageId: pageId, userId: userId, body: body))
+      .select().single().execute().value
+  }
+
     func createCircle(name: String, creatorID: UUID) async throws -> Circle {
 
         let circle: Circle = try await supabase.from("circles")
@@ -200,21 +227,44 @@ final class DatabaseService {
 enum YouTubeOEmbed {
   private struct Response: Decodable { let title: String }
 
-  /// The video's title, or nil if it's private/removed or the request fails.
-  static func title(forVideoID id: String) async -> String? {
-    guard var components = URLComponents(string: "https://www.youtube.com/oembed") else { return nil }
+  /// Test seam: unit tests swap in a URLProtocol-stubbed session.
+  nonisolated(unsafe) static var session: URLSession = .shared
+
+  enum Lookup {
+    case found(title: String)
+    case unavailable   // 4xx: private, removed, or bogus id — the video won't play either
+    case unknown       // network hiccup or odd response — can't tell, don't block
+  }
+
+  static func lookup(forVideoID id: String) async -> Lookup {
+    guard var components = URLComponents(string: "https://www.youtube.com/oembed") else { return .unknown }
     components.queryItems = [
       URLQueryItem(name: "url", value: "https://www.youtube.com/watch?v=\(id)"),
       URLQueryItem(name: "format", value: "json"),
     ]
-    guard let url = components.url else { return nil }
+    guard let url = components.url else { return .unknown }
     do {
-      let (data, response) = try await URLSession.shared.data(from: url)
-      guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-      return try JSONDecoder().decode(Response.self, from: data).title
+      // Short timeout: the default 60s leaves compose sitting on "Fetching
+      // details…"; a missing title is fine, the post works without it.
+      var request = URLRequest(url: url)
+      request.timeoutInterval = 8
+      let (data, response) = try await session.data(for: request)
+      guard let status = (response as? HTTPURLResponse)?.statusCode else { return .unknown }
+      oembedLog.info("oEmbed status \(status) for \(id, privacy: .public)")
+      if (400..<500).contains(status) { return .unavailable }
+      guard status == 200, let decoded = try? JSONDecoder().decode(Response.self, from: data)
+      else { return .unknown }
+      return .found(title: decoded.title)
     } catch {
-      return nil
+      oembedLog.info("oEmbed error for \(id, privacy: .public): \(error, privacy: .public)")
+      return .unknown
     }
+  }
+
+  /// The video's title, or nil if unavailable or the request fails.
+  static func title(forVideoID id: String) async -> String? {
+    if case .found(let title) = await lookup(forVideoID: id) { return title }
+    return nil
   }
 }
 

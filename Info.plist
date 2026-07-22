@@ -16,6 +16,10 @@
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- The palette in Style.swift is fixed light-mode hex; without this, dark
+	     mode turns any un-styled text white on the light paper background. -->
+	<key>UIUserInterfaceStyle</key>
+	<string>Light</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
