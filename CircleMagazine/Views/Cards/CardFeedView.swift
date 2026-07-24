@@ -10,15 +10,23 @@
 import SwiftUI
 
 struct CardFeedView: View {
-    let issueLoader: IssueLoader
+    let vm: IssueViewModel
     /// The signed-in viewer, so cards can open the comments sheet. Nil in
     /// previews / signed-out, where comment bars stay static.
     var me: User? = nil
+    /// Masthead wordmark + optional flanking controls (back / members / compose),
+    /// supplied by the circle screen; defaults keep the standalone feed unchanged.
+    var title: String = "Circle"
+    var mastheadLeading: AnyView? = nil
+    var mastheadTrailing: AnyView? = nil
+    /// The card the feed is snapped to (its page id), for YouTube autoplay.
+    @State private var visibleCardId: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
-            Masthead(title: "Circle", stamp: editionDate)
-            switch issueLoader.loadState {
+            Masthead(title: title, stamp: editionDate,
+                     leading: mastheadLeading, trailing: mastheadTrailing)
+            switch vm.state {
                 case .loading:
                     Spacer()
                     Text("Retrieving latest issue...")
@@ -27,7 +35,6 @@ struct CardFeedView: View {
                 case .loaded(let magazine) where magazine.cards.isEmpty:
                     emptyEdition
                 case .loaded(let magazine):
-                    ContributorsRow(contributors: magazine.contributors)
                     viewport(for: magazine)
                 case .failedToLoad(let errorStr):
                     Spacer()
@@ -51,7 +58,7 @@ struct CardFeedView: View {
             }
         }
         .background(Style.chrome)
-        .task { await issueLoader.refreshIfNeeded() }
+        .task { await vm.appear() }
     }
 
     // A live-or-draft edition that exists but has no posts yet. Distinct from
@@ -78,7 +85,7 @@ struct CardFeedView: View {
 
     // The live issue's date once loaded; nil (no stamp) while loading/failed.
     private var editionDate: String? {
-        guard case .loaded(let magazine) = issueLoader.loadState else { return nil }
+        guard case .loaded(let magazine) = vm.state else { return nil }
         return magazine.issue.editionDate
     }
 
@@ -87,11 +94,22 @@ struct CardFeedView: View {
     private func viewport(for magazine: Magazine) -> some View {
         let peek = Style.Space.xxl              // lip of the next card at the bottom
         let topGap = Style.Space.sm             // small space under the contributors row
+        // Nil until the first scroll — treat the top card as active so it
+        // autoplays on open.
+        let activeId = visibleCardId ?? magazine.cards.first?.id
         return ScrollView(.vertical) {
             LazyVStack(spacing: Style.Space.sm) {
                 ForEach(magazine.cards) { cardViewModel in
-                    CardView(viewModel: cardViewModel, db: issueLoader.db, me: me)
-                        .feedCardFrame()
+                    let card = CardView(viewModel: cardViewModel, issue: vm, me: me,
+                                        isActive: cardViewModel.id == activeId,
+                                        onDelete: { await vm.delete(pageId: cardViewModel.id) })
+                    // A reel card sizes to its cropped poster; every other card
+                    // fills the viewport height.
+                    if cardViewModel.isTallInsta {
+                        card.feedCardWidth()
+                    } else {
+                        card.feedCardFrame()
+                    }
                 }
             }
             .scrollTargetLayout()
@@ -99,68 +117,14 @@ struct CardFeedView: View {
         // viewAligned snaps to each card; asymmetric margins keep the first
         // card close under the contributors row while still peeking the next.
         .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+        .scrollPosition(id: $visibleCardId)
         .contentMargins(.top, topGap, for: .scrollContent)
         .contentMargins(.bottom, peek, for: .scrollContent)
         .scrollIndicators(.hidden)
     }
 }
 
-// MARK: - Contributors row
-
-// The edition's authors, in a horizontal scroller below the masthead.
-// ponytail: every author shown is an active contributor — the mockup's dashed
-// "inactive friend" state needs a friends list we don't have yet; add it then.
-private struct ContributorsRow: View {
-    let contributors: [User]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Style.Space.sm) {
-            let contStr = contributors.count == 1 ? "CONTRIBUTOR" : "CONTRIBUTORS"
-            Text("\(contributors.count) \(contStr)")
-                .font(Style.eyebrow).tracking(1.0)
-                .foregroundStyle(Style.meta)
-            ScrollView(.horizontal) {
-                HStack(spacing: Style.Space.md) {
-                    ForEach(contributors, id: \.id) { ContributorBubble(user: $0) }
-                }
-            }
-            .scrollIndicators(.hidden)
-        }
-        .padding(.horizontal, Style.Space.xl)
-        .padding(.vertical, 9)
-        .overlay(alignment: .bottom) { Rectangle().fill(Style.rule).frame(height: 1) }
-    }
-}
-
-private struct ContributorBubble: View {
-    let user: User
-
-    var body: some View {
-        VStack(spacing: 5) {
-            avatar
-                .padding(2)                              // 2px edition ring around the avatar
-                .background(Style.edition, in: SwiftUI.Circle())
-            Text(user.username)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Color(hex: 0x4A4742))
-                .lineLimit(1)
-        }
-    }
-
-    private var avatar: some View {
-        AsyncImage(url: user.avatarUrl.flatMap(URL.init(string:))) { $0.resizable().scaledToFill() }
-            placeholder: {
-                Color(hex: 0x3A3A52).overlay(
-                    Text(user.username.prefix(2).uppercased())
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white))
-            }
-            .frame(width: 32, height: 32)
-            .clipShape(SwiftUI.Circle())
-            .overlay(SwiftUI.Circle().stroke(Style.chrome, lineWidth: 2))
-    }
-}
 
 #Preview {
-    CardFeedView(issueLoader: .preview(.loaded(Magazine.sample)))
+    CardFeedView(vm: .preview(.loaded(Magazine.sample)))
 }

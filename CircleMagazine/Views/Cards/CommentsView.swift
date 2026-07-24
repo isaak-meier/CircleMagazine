@@ -59,8 +59,8 @@ struct CommentsView: View {
     @State private var model: CommentsModel
     @Environment(\.dismiss) private var dismiss
 
-    init(db: DatabaseService, pageId: UUID, me: User) {
-        _model = State(initialValue: CommentsModel(db: db, pageId: pageId, me: me))
+    init(model: CommentsModel) {
+        _model = State(initialValue: model)
     }
 
     var body: some View {

@@ -9,28 +9,66 @@ import AVKit
 
 struct CardView: View {
     let viewModel: CardViewModel
-    /// Comments are interactive only when the feed passes the service + viewer.
-    /// Nil in the compose preview, where the bar is a static mockup.
-    var db: DatabaseService? = nil
+    /// The edition's VM — supplies comments + poster URLs. Nil in the compose
+    /// preview, where the bar is a static mockup and the poster is a direct URL.
+    var issue: IssueViewModel? = nil
     var me: User? = nil
+    /// True for the card the feed is snapped to — drives YouTube autoplay.
+    var isActive: Bool = false
+    /// Deletes this page (feed supplies the DB call + refresh). Offered only on
+    /// the viewer's own posts, matching the DB's "delete own pages" rule.
+    var onDelete: (() async -> Void)? = nil
+    /// Compose only: dragging the reel poster reports a new crop focus. Nil in
+    /// the feed, where the poster is static and taps out to Instagram.
+    var onPosterFocusChange: ((Double) -> Void)? = nil
 
     @State private var showComments = false
+    @State private var confirmingDelete = false
 
-    private var commentsEnabled: Bool { db != nil && me != nil }
+    private var commentsEnabled: Bool { issue != nil && me != nil }
+    private var canDelete: Bool { onDelete != nil && me?.id == viewModel.author?.id }
+
+    // 1a (paperPlate video) has its own Comment/React/Re-circle footer; other
+    // cards get the standalone comment pill.
+    private var showsCommentBar: Bool {
+        if case .video = viewModel.media.first, viewModel.captionStyle == .paperPlate { return false }
+        return true
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             content
-            CommentBar(action: commentsEnabled ? { showComments = true } : nil)
+            if showsCommentBar {
+                CommentBar(action: commentsEnabled ? { showComments = true } : nil)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Style.paper)
         .clipShape(RoundedRectangle(cornerRadius: Style.cardRadius))
         .shadow(color: .black.opacity(0.18), radius: 20, y: 6)
         .sheet(isPresented: $showComments) {
-            if let db, let me {
-                CommentsView(db: db, pageId: viewModel.id, me: me)
+            if let issue {
+                CommentsView(model: issue.commentsVM(for: viewModel.id))
             }
+        }
+        .confirmationDialog("Delete this post?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) { Task { await onDelete?() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("It's removed from the edition for everyone. This can't be undone.")
+        }
+    }
+
+    // ⋯ menu, shown in the poster row. Native Menu, same as the Circles
+    // join/create menu.
+    private var cardMenu: some View {
+        Menu {
+            Button("Delete Post", role: .destructive) { confirmingDelete = true }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Style.meta)
+                .frame(width: 30, height: 30, alignment: .trailing)
         }
     }
 
@@ -38,7 +76,8 @@ struct CardView: View {
     private var content: some View {
         // ponytail: .first — video-only cards; switch on the full array if mixed cards appear
         switch viewModel.media.first {
-        case .video(let source): VideoCard(source: source, author: viewModel.author, caption: viewModel.caption, title: viewModel.title, captionStyle: viewModel.captionStyle, cardShape: viewModel.cardShape)
+        case .video(let source, let instaPoster, let handle, let focus):
+            VideoCard(source: source, author: viewModel.author, caption: viewModel.caption, title: viewModel.title, captionStyle: viewModel.captionStyle, cardShape: viewModel.cardShape, onComment: commentsEnabled ? { showComments = true } : nil, isActive: isActive, trailingAccessory: canDelete ? AnyView(cardMenu) : nil, instaPoster: instaPoster, instaHandle: handle, issue: issue, instaFocus: focus, onInstaFocusChange: onPosterFocusChange)
         default:                 standardCard   // image / fallback / empty
         }
     }

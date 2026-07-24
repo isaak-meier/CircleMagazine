@@ -49,12 +49,18 @@ struct PageMediaInsert: Encodable {
     let pageId: UUID
     let mediaUrl: String?
     let mediaType: String?
+    var textContent: String? = nil   // insta: the @handle
+    var posterUrl: String? = nil      // insta: storage path of the cover frame
+    var posterFocus: Double? = nil    // insta: author-chosen vertical crop, 0…1
     let position: Int
 
     enum CodingKeys: String, CodingKey {
         case pageId = "page_id"
         case mediaUrl = "media_url"
         case mediaType = "media_type"
+        case textContent = "text_content"
+        case posterUrl = "poster_url"
+        case posterFocus = "poster_focus"
         case position
     }
 }

@@ -88,12 +88,14 @@ struct Follow: Codable {
 
 struct Issue: Codable {
     let id: UUID
+    let circleId: UUID
     let publishDate: String
     let isLive: Bool?
     let createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
+        case circleId = "circle_id"
         case publishDate = "publish_date"
         case isLive = "is_live"
         case createdAt = "created_at"
@@ -127,7 +129,9 @@ struct PageMedia: Codable, Identifiable {
     let pageId: UUID?
     let mediaUrl: String?     // nil for text widgets
     let mediaType: String?
-    let textContent: String?  // nil for media widgets
+    let textContent: String?  // nil for media widgets; the @handle for insta cards
+    let posterUrl: String?    // insta: storage path of the re-hosted cover frame
+    let posterFocus: Double?  // insta: author-chosen vertical crop, 0 top…1 bottom; nil ⇒ center
     let position: Int?
     let createdAt: Date?
 
@@ -137,6 +141,8 @@ struct PageMedia: Codable, Identifiable {
         case mediaUrl = "media_url"
         case mediaType = "media_type"
         case textContent = "text_content"
+        case posterUrl = "poster_url"
+        case posterFocus = "poster_focus"
         case position
         case createdAt = "created_at"
     }

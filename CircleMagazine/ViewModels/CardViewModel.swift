@@ -28,11 +28,21 @@ struct CardViewModel: Identifiable {
             .map(CardMediaViewModel.init)
     }
 
-    /// Compose live preview — a card that doesn't exist in the DB yet.
+    /// A tall Instagram reel: the feed lets these size to their cropped poster
+    /// rather than stretching them to full viewport height.
+    var isTallInsta: Bool {
+        guard cardShape == .tall, case .video(.insta, _, _, _) = media.first else { return false }
+        return true
+    }
+
+    /// Compose live preview — a card that doesn't exist in the DB yet. For an
+    /// insta preview, `instaPoster`/`handle` carry the freshly-scraped frame so
+    /// the preview matches the feed card (no re-host round trip needed yet).
     init(previewing source: VideoSource, author: User?, title: String?, caption: String?,
-         captionStyle: CaptionStyle, cardShape: CardShape) {
+         captionStyle: CaptionStyle, cardShape: CardShape,
+         instaPoster: InstaPoster? = nil, handle: String? = nil, focus: Double = 0.5) {
         self.id = UUID()
-        self.media = [.video(source)]
+        self.media = [.video(source, instaPoster, handle: handle, focus: focus)]
         self.author = author
         self.title = title
         self.caption = caption
@@ -41,12 +51,21 @@ struct CardViewModel: Identifiable {
     }
 }
 
+/// Where an Instagram card's cover frame comes from: a path in our private
+/// `posters` bucket (feed — needs signing) or a directly-loadable URL (compose
+/// preview — the fresh scrape, still valid).
+enum InstaPoster {
+    case stored(path: String)
+    case direct(URL)
+}
+
 /// One renderable piece of a card, transformed from a raw `PageMedia` row.
 /// Text/audio are parked — `init?` returns nil for them, so they drop out
 /// of the `compactMap` above.
 enum CardMediaViewModel {
     case image(URL)
-    case video(VideoSource)
+    // insta carries its re-hosted poster + @handle + crop focus; nil/center for YouTube.
+    case video(VideoSource, InstaPoster?, handle: String?, focus: Double)
     case fallback(CardMediaError?)
 
     init(_ media: PageMedia) {
@@ -58,7 +77,9 @@ enum CardMediaViewModel {
             case "image": self = .image(url)
             case "video":
                 if let videoSource = VideoSource(url) {
-                    self = .video(videoSource)
+                    let poster = media.posterUrl.map(InstaPoster.stored)
+                    self = .video(videoSource, poster, handle: media.textContent,
+                                  focus: media.posterFocus ?? 0.5)
                 } else {
                     self = .fallback(CardMediaError.invalidURL)
                 }

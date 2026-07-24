@@ -13,9 +13,14 @@ struct Masthead: View {
     let title: String
     var stamp: String? = nil
     var eyebrow: String = "THIS SUNDAY'S EDITION"
+    /// Optional accessories flanking the wordmark — e.g. a back chevron on the
+    /// left, members/compose controls on the right. Both nil ⇒ plain masthead.
+    var leading: AnyView? = nil
+    var trailing: AnyView? = nil
 
     var body: some View {
         HStack(alignment: .lastTextBaseline) {
+            if let leading { leading }
             Text(title).font(Style.wordmark).foregroundStyle(Style.ink)
             Spacer()
             if let stamp {
@@ -27,6 +32,7 @@ struct Masthead: View {
                 }
                 .foregroundStyle(Style.edition)
             }
+            if let trailing { trailing }
         }
         .padding(.bottom, Style.Space.md)
         .overlay(alignment: .bottom) { Rectangle().fill(Style.ink).frame(height: 2) }

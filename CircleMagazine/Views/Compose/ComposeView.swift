@@ -23,11 +23,17 @@ final class ComposeModel {
         let source: VideoSource
         let title: String?
         let shape: CardShape
+        // Instagram: the scraped cover frame + @handle, so the preview shows the
+        // real card and post() can re-host without scraping again.
+        var insta: InstagramEmbed.Meta? = nil
     }
 
     var linkText = ""
     var caption = ""
     var captionStyle: CaptionStyle = .paperPlate
+    /// Author-chosen vertical crop for a reel poster (0 top…1 bottom), set by
+    /// dragging the preview. Centered until they move it.
+    var posterFocus: Double = 0.5
     private(set) var resolved: Resolved?
     private(set) var isResolving = false
     private(set) var phase: Phase = .editing
@@ -37,15 +43,19 @@ final class ComposeModel {
     /// The live edition to post into. The feed provides it when loaded; when it
     /// couldn't (feed error), post() asks the DB directly rather than staying dead.
     private var issueId: UUID?
+    /// The circle being posted into — used to ask the DB for the live edition
+    /// when the caller didn't already hand us an issue id.
+    private let circleId: UUID
     private(set) var resolveTask: Task<Void, Never>?   // exposed so tests can await it
     /// Stamps each resolve pass; a pass only touches state while its stamp is
     /// current, so cancelled/superseded passes can't strand the spinner.
     private var resolveGeneration = 0
     let author: User
 
-    init(db: DatabaseService, issueId: UUID?, author: User) {
+    init(db: DatabaseService, issueId: UUID?, circleId: UUID, author: User) {
         self.db = db
         self.issueId = issueId
+        self.circleId = circleId
         self.author = author
     }
 
@@ -84,7 +94,9 @@ final class ComposeModel {
         errorText = nil
         isResolving = true
         var title: String?
-        if case .youtube(let id) = source {   // Instagram has no keyless lookup, so no dead-link check either.
+        var insta: InstagramEmbed.Meta?
+        switch source {
+        case .youtube(let id):
             let began = Date()
             let lookup = await YouTubeOEmbed.lookup(forVideoID: id)
             log.info("resolve: oEmbed took \(Date().timeIntervalSince(began), format: .fixed(precision: 1))s → \(String(describing: lookup), privacy: .public)")
@@ -100,9 +112,18 @@ final class ComposeModel {
                 return
             case .unknown: break   // can't tell; post without a title rather than block
             }
+        case .insta(let id, let kind):
+            // Best-effort: scrape the cover frame + @handle for the preview. A
+            // miss just posts with the gradient fallback, so don't block on it.
+            insta = await InstagramEmbed.fetch(id: id, kind: kind)
+            guard generation == resolveGeneration else {
+                log.info("resolve exit: cancelled/superseded mid-fetch")
+                return
+            }
+        case .rawFile: break
         }
         resolved = Resolved(videoURL: url, source: source, title: title,
-                            shape: CardShape(mediaURL: url))
+                            shape: CardShape(mediaURL: url), insta: insta)
         isResolving = false
         log.info("resolve exit: resolved, title=\(title ?? "nil", privacy: .public)")
     }
@@ -116,6 +137,7 @@ final class ComposeModel {
         resolved = nil
         linkText = ""
         errorText = nil
+        posterFocus = 0.5
     }
 
     func post() async {
@@ -123,7 +145,7 @@ final class ComposeModel {
         phase = .posting
         errorText = nil
         if issueId == nil {   // feed never loaded — ask the DB for the edition directly
-            issueId = try? await db.currentIssueId()
+            issueId = try? await db.currentIssueId(circleId: circleId)
         }
         guard let issueId else {
             errorText = "No live edition to post to yet — try again in a moment."
@@ -135,7 +157,8 @@ final class ComposeModel {
                 issueId: issueId, authorId: author.id,
                 videoURL: resolved.videoURL,
                 caption: caption.isEmpty ? nil : caption,
-                captionStyle: captionStyle, cardShape: resolved.shape)
+                captionStyle: captionStyle, cardShape: resolved.shape,
+                insta: resolved.insta, posterFocus: posterFocus)
             phase = .posted
         } catch {
             errorText = "Couldn't post your video — \(error.localizedDescription)"
@@ -154,14 +177,10 @@ struct ComposeView: View {
     /// Called when the post lands, so the feed can refresh to include it.
     let onPosted: () async -> Void
 
-    init(db: DatabaseService, issueId: UUID?, author: User,
-         onPosted: @escaping () async -> Void) {
-        _model = State(initialValue: ComposeModel(db: db, issueId: issueId, author: author))
-        self.onPosted = onPosted
-    }
-
-    /// Canvas previews inject a pre-staged model to land on a specific step.
-    fileprivate init(model: ComposeModel, onPosted: @escaping () async -> Void) {
+    /// The compose VM is built by the edition's IssueViewModel (`composeVM()`),
+    /// so this view never sees a DatabaseService. Previews inject a pre-staged
+    /// model to land on a specific step.
+    init(model: ComposeModel, onPosted: @escaping () async -> Void) {
         _model = State(initialValue: model)
         self.onPosted = onPosted
     }
@@ -351,20 +370,31 @@ struct ComposeView: View {
         }
     }
 
-    // Four caption treatments (1a–1d). Tap re-renders the preview above.
+    // Only 1a (paper plate) ships for now; 1b–1d are marked "Soon" and disabled.
     private var stylePicker: some View {
         HStack(spacing: 8) {
             ForEach(CaptionStyle.allCases) { style in
+                let comingSoon = style != .paperPlate
                 let selected = model.captionStyle == style
-                Button { model.captionStyle = style } label: {
-                    Text(style.displayName)
-                        .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
-                        .foregroundStyle(selected ? Style.paper : Color(hex: 0xA8A39C))
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background { if selected { Capsule().fill(Style.ink) } }
-                        .overlay { if !selected { Capsule().stroke(Style.rule, lineWidth: 1) } }
+                Button { if !comingSoon { model.captionStyle = style } } label: {
+                    HStack(spacing: 5) {
+                        Text(style.displayName)
+                        if comingSoon {
+                            Text("SOON").font(.system(size: 8, weight: .bold)).tracking(0.4)
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(Capsule().fill(Color(hex: 0xE3E0DB)))
+                                .foregroundStyle(Style.meta)
+                        }
+                    }
+                    .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? Style.paper : Color(hex: 0xA8A39C))
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background { if selected { Capsule().fill(Style.ink) } }
+                    .overlay { if !selected { Capsule().stroke(Style.rule, lineWidth: 1) } }
+                    .opacity(comingSoon ? 0.5 : 1)
                 }
                 .buttonStyle(.plain)
+                .disabled(comingSoon)
             }
         }
     }
@@ -384,24 +414,40 @@ struct ComposeView: View {
                 sectionLabel("How it appears in the edition").padding(.top, 18).padding(.bottom, 11)
                 // The exact card the feed renders (CardView owns the paper,
                 // corner radius, and shadow), so the preview can't drift.
-                CardView(viewModel: CardViewModel(
+                // A reel's poster is draggable to reposition its crop; every
+                // other preview stays inert.
+                let reel = isReel(resolved)
+                let preview = CardView(viewModel: CardViewModel(
                     previewing: resolved.source, author: model.author,
                     title: resolved.title,
                     caption: model.caption.isEmpty ? nil : model.caption,
-                    captionStyle: model.captionStyle, cardShape: resolved.shape))
+                    captionStyle: model.captionStyle, cardShape: resolved.shape,
+                    instaPoster: resolved.insta.map { .direct($0.posterURL) },
+                    handle: resolved.insta?.handle, focus: model.posterFocus),
+                    onPosterFocusChange: reel ? { model.posterFocus = $0 } : nil)
+
+                if reel {
+                    // A reel card sizes to its (square) poster + plate, exactly
+                    // like the feed — no fixed height. The note input sits below
+                    // it, so the card is a true replica. Content sizing here is
+                    // width-driven (aspectRatio), so it doesn't hit the
+                    // containerRelativeFrame keyboard-loop that feedCardFrame did.
+                    preview
+                } else {
                     // Fixed height, NOT .feedCardFrame(): its containerRelativeFrame
                     // sizing feeds back against keyboard avoidance in this sheet's
-                    // ScrollView and locks the main thread in a layout loop.
-                    .frame(height: previewHeight(resolved.shape))
-                    .allowsHitTesting(false)
-                    // The comment field lives in the card's leftover paper area at
-                    // the bottom — a white bordered pill, per the compose design.
-                    .overlay(alignment: .bottom) { noteField }
+                    // ScrollView and locks the main thread in a layout loop. The
+                    // comment field overlays the card's leftover paper area.
+                    preview
+                        .frame(height: previewHeight(resolved.shape))
+                        .allowsHitTesting(false)
+                }
 
-                sectionLabel("Caption style").padding(.top, 22).padding(.bottom, 11)
-                stylePicker
+                Spacer()
 
-                Rectangle().fill(hairline).frame(height: 1).padding(.vertical, 18)
+                noteField
+
+//                Rectangle().fill(hairline).frame(height: 1).padding(.vertical, 18)
 
                 HStack(spacing: 9) {
                     SwiftUI.Circle().fill(Style.edition).frame(width: 7, height: 7)
@@ -417,6 +463,13 @@ struct ComposeView: View {
     /// Card height per shape so media + plate + note fill it without a void:
     /// wide stacks a 16:9 region and the plate, square is taller, and tall is
     /// full-bleed media (the note overlays the media bottom there).
+    // A tall Instagram reel — the only preview whose poster we let the author
+    // reposition (posts are square, YouTube isn't croppable here).
+    private func isReel(_ resolved: ComposeModel.Resolved) -> Bool {
+        if case .insta = resolved.source, resolved.shape == .tall { return true }
+        return false
+    }
+
     private func previewHeight(_ shape: CardShape) -> CGFloat {
         switch shape {
         case .wide:   400
@@ -425,16 +478,21 @@ struct ComposeView: View {
         }
     }
 
-    private var noteField: some View {
+    // The "Add a comment…" pill. Used inset inside a card (noteField, the
+    // overlay path) and full-width below the reel card.
+    private var noteFieldPill: some View {
         HStack(spacing: 11) {
             avatar(model.author, size: 26)
-            TextField("Add a comment…", text: $model.caption, axis: .vertical)
+            TextField("Add a caption…", text: $model.caption, axis: .vertical)
                 .font(.system(size: 14)).foregroundStyle(Color(hex: 0x2A2826))
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .background(.white, in: RoundedRectangle(cornerRadius: 13))
         .overlay(RoundedRectangle(cornerRadius: 13).stroke(Style.rule, lineWidth: 1))
-        .padding(.horizontal, 16).padding(.bottom, 16)
+    }
+
+    private var noteField: some View {
+        noteFieldPill.padding(.bottom, 16)
     }
 
     private func linkedChip(_ resolved: ComposeModel.Resolved) -> some View {
@@ -555,15 +613,15 @@ extension ComposeModel {
 
 
 #Preview("Compose step — note in card") {
-    let model = ComposeModel(db: DatabaseService(), issueId: nil,
+    let model = ComposeModel(db: DatabaseService(), issueId: nil, circleId: UUID(),
                              author: Magazine.sample.pages[0].author!)
-    model.previewResolved(url: "https://www.youtube.com/watch?v=62bIsvRcPv0",
+    model.previewResolved(url: "https://www.instagram.com/reels/DZXrc1uuezb/",
                           title: "I Spent 3 Weeks Living Off-Grid in the Mountains")
     return ComposeView(model: model) {}
 }
 
 #Preview("Confirmation") {
-    let model = ComposeModel(db: DatabaseService(), issueId: nil,
+    let model = ComposeModel(db: DatabaseService(), issueId: nil, circleId: UUID(),
                              author: Magazine.sample.pages[0].author!)
     model.previewResolved(url: "https://www.youtube.com/watch?v=62bIsvRcPv0",
                           title: "I Spent 3 Weeks Living Off-Grid in the Mountains")

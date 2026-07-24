@@ -58,10 +58,10 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
   /// (ordered by position). `live: false` fetches the newest draft instead —
   /// the Account screen's edition-preview toggle.
   /// could be optimzed for multiple async server calls TODO
-  func fetchCurrentIssue(live: Bool = true) async throws -> Magazine {
+  func fetchCurrentIssue(circleId: UUID) async throws -> Magazine {
 
     let issues: [Issue] = try await supabase.from("issues")
-      .select().eq("is_live", value: live)
+      .select().eq("is_live", value: true).eq("circle_id", value: circleId.uuidString)
       .order("created_at", ascending: false).limit(1).execute().value
     guard let issue = issues.first else { throw IssueError.emptyData }
 
@@ -94,9 +94,9 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
   }
 
   /// Cheap staleness probe — just the issue's id, no pages/media.
-  func currentIssueId(live: Bool = true) async throws -> UUID? {
+  func currentIssueId(circleId: UUID) async throws -> UUID? {
     let issues: [Issue] = try await supabase.from("issues")
-      .select().eq("is_live", value: live)
+      .select().eq("is_live", value: true).eq("circle_id", value: circleId.uuidString)
       .order("created_at", ascending: false).limit(1).execute().value
     return issues.first?.id
   }
@@ -134,9 +134,16 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
   /// oEmbed and store it on the page, so the feed can read `pages.title` without
   /// any per-render network calls. Title lookup is best-effort — a failure just
   /// leaves the title nil rather than blocking the post.
+  ///
+  /// Instagram can't play inline, so `insta` carries the pre-scraped cover frame
+  /// URL + @handle (from compose): we download that still and re-host it in the
+  /// `posters` bucket, storing its path in poster_url and the handle in
+  /// text_content. A failed re-host just leaves poster_url nil — the card falls
+  /// back to its gradient rather than blocking the post.
   @discardableResult
   func createVideoPost(issueId: UUID, authorId: UUID, videoURL: URL, caption: String?,
-                       captionStyle: CaptionStyle, cardShape: CardShape) async throws -> Page {
+                       captionStyle: CaptionStyle, cardShape: CardShape,
+                       insta: InstagramEmbed.Meta? = nil, posterFocus: Double? = nil) async throws -> Page {
     var title: String?
     if case .youtube(let id)? = VideoSource(videoURL) {
       title = await YouTubeOEmbed.title(forVideoID: id)
@@ -145,11 +152,44 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
       .insert(PageInsert(issueId: issueId, submittedBy: authorId, title: title,
                          caption: caption, captionStyle: captionStyle, cardShape: cardShape))
       .select().single().execute().value
+
+    var posterPath: String?
+    if let insta, case .insta(let id, _)? = VideoSource(videoURL) {
+      posterPath = try? await rehostPoster(from: insta.posterURL, reelID: id)
+    }
     try await supabase.from("page_media")
       .insert(PageMediaInsert(pageId: page.id, mediaUrl: videoURL.absoluteString,
-                              mediaType: "video", position: 0))
+                              mediaType: "video", textContent: insta?.handle,
+                              posterUrl: posterPath,
+                              posterFocus: insta != nil ? posterFocus : nil, position: 0))
       .execute()
+
+    // The author's note becomes the post's first comment. Best-effort: the page
+    // already exists, so a comment hiccup shouldn't fail the whole post.
+    if let caption {
+      _ = try? await supabase.from("comments")
+        .insert(CommentInsert(pageId: page.id, userId: authorId, body: caption))
+        .execute()
+    }
     return page
+  }
+
+  /// Download the Instagram cover frame and upload it to the `posters` bucket at
+  /// `{reelID}.jpg` (upsert, so re-posting the same reel replaces its file).
+  /// Returns the stored object path.
+  private func rehostPoster(from remote: URL, reelID: String) async throws -> String {
+    let (data, _) = try await URLSession.shared.data(from: remote)
+    let path = "\(reelID).jpg"
+    try await supabase.storage.from("posters")
+      .upload(path, data: data, options: FileOptions(contentType: "image/jpeg", upsert: true))
+    return path
+  }
+
+  /// A short-lived signed URL for a poster in the private `posters` bucket —
+  /// the bucket is authed-only, so the feed regenerates one each time a card
+  /// appears (cheap, and never a dead link since it's our bucket).
+  func posterSignedURL(path: String) async -> URL? {
+    try? await supabase.storage.from("posters").createSignedURL(path: path, expiresIn: 3600)
   }
 
   /// A page's comments, oldest first, each paired with its author (one extra
@@ -173,6 +213,12 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
       .select().single().execute().value
   }
 
+  /// Delete a page (post). page_media and comments cascade; RLS limits this to
+  /// the page's own author.
+  func deletePage(pageId: UUID) async throws {
+    try await supabase.from("pages").delete().eq("id", value: pageId.uuidString).execute()
+  }
+
     func createCircle(name: String, creatorID: UUID) async throws -> Circle {
 
         let circle: Circle = try await supabase.from("circles")
@@ -189,8 +235,8 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
 
     /// The subset of `memberIds` who have submitted a page to the current live
     /// issue. Empty when no issue is live.
-    func submitterIds(among memberIds: [UUID]) async throws -> Set<UUID> {
-        guard let issueId = try await currentIssueId() else { return [] }
+    func submitterIds(among memberIds: [UUID], circleId: UUID) async throws -> Set<UUID> {
+        guard let issueId = try await currentIssueId(circleId: circleId) else { return [] }
         struct Row: Decodable {
             let submittedBy: UUID?
             enum CodingKeys: String, CodingKey { case submittedBy = "submitted_by" }
@@ -265,6 +311,51 @@ enum YouTubeOEmbed {
   static func title(forVideoID id: String) async -> String? {
     if case .found(let title) = await lookup(forVideoID: id) { return title }
     return nil
+  }
+}
+
+/// Instagram won't play inline and its official oEmbed now needs a token, so we
+/// read the two things we can display from the public embed page: the reel's
+/// cover-frame URL and the creator's @handle. Best-effort — a nil means we post
+/// (or preview) without a real frame rather than blocking.
+enum InstagramEmbed {
+  struct Meta: Sendable { let posterURL: URL; let handle: String }
+
+  /// Test seam: unit tests swap in a URLProtocol-stubbed session.
+  nonisolated(unsafe) static var session: URLSession = .shared
+
+  static func fetch(id: String, kind: InstagramContentType) async -> Meta? {
+    let seg = kind == .post ? "p" : "reel"
+    guard let url = URL(string: "https://www.instagram.com/\(seg)/\(id)/embed/captioned/") else { return nil }
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 8
+    // The embed page only serves the poster markup to a browser-ish UA.
+    request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+                     forHTTPHeaderField: "User-Agent")
+    guard let (data, response) = try? await session.data(for: request),
+          (response as? HTTPURLResponse)?.statusCode == 200,
+          let html = String(data: data, encoding: .utf8),
+          let poster = parsePosterURL(html) else { return nil }
+    return Meta(posterURL: poster, handle: parseHandle(html) ?? "")
+  }
+
+  /// src of `<img class="EmbeddedMediaImage" … src="…">` — the cover frame (not
+  /// the profile pic, which is a separate <img> without that class).
+  static func parsePosterURL(_ html: String) -> URL? {
+    guard let anchor = html.range(of: "EmbeddedMediaImage"),
+          let srcOpen = html.range(of: "src=\"", range: anchor.upperBound..<html.endIndex),
+          let srcClose = html.range(of: "\"", range: srcOpen.upperBound..<html.endIndex) else { return nil }
+    let raw = html[srcOpen.upperBound..<srcClose.lowerBound]
+      .replacingOccurrences(of: "&amp;", with: "&")
+    return URL(string: raw)
+  }
+
+  /// The handle inside `class="UsernameText">infinite_mantra</span>`.
+  static func parseHandle(_ html: String) -> String? {
+    guard let anchor = html.range(of: "UsernameText\">"),
+          let close = html.range(of: "<", range: anchor.upperBound..<html.endIndex) else { return nil }
+    let name = String(html[anchor.upperBound..<close.lowerBound])
+    return name.isEmpty ? nil : name
   }
 }
 

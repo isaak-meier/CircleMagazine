@@ -46,15 +46,18 @@ enum Style {
 }
 
 extension View {
-    /// Screen-filling feed-card size, inferred from the enclosing scroll
-    /// container rather than measured and plumbed. The feed and the compose
-    /// preview both apply this so they render the card at the same size.
-    /// Width leaves a side margin; height leaves the next-card peek and the gap
-    /// under the header row so the following card lips into view.
+    /// Feed card width: full width less a side margin.
+    func feedCardWidth() -> some View {
+        containerRelativeFrame(.horizontal) { w, _ in w - 2 * Style.Space.md }
+    }
+
+    /// Full-screen feed card: `feedCardWidth` plus the viewport height less the
+    /// next-card peek. The video fills whatever's left above the fixed-height
+    /// plate. Cards that crop to their own content (a reel poster) use just
+    /// `feedCardWidth` and size themselves vertically instead.
     func feedCardFrame() -> some View {
-        self
-            .containerRelativeFrame(.horizontal) { w, _ in w - 2 * Style.Space.md }
-            .containerRelativeFrame(.vertical)   { h, _ in h - Style.Space.xxl - Style.Space.sm }
+        feedCardWidth()
+            .containerRelativeFrame(.vertical) { h, _ in h - Style.Space.xxl - Style.Space.sm }
     }
 }
 

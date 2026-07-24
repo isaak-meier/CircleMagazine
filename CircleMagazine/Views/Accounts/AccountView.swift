@@ -10,8 +10,6 @@ import SwiftUI
 
 struct AccountView: View {
     let account: AccountManager
-    let issueLoader: IssueLoader
-    @AppStorage(IssueLoader.showDraftKey) private var showDraftIssue = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,7 +18,6 @@ struct AccountView: View {
                 switch account.authState {
                 case .signedIn(let user):
                     profile(user)
-                    editionToggle
                     Spacer()
                     signOut
                 case .loading, .signedOut:
@@ -47,22 +44,6 @@ struct AccountView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Flips the feed between the live edition and the newest draft.
-    private var editionToggle: some View {
-        VStack(alignment: .leading, spacing: Style.Space.xs) {
-            Text("EDITION")
-                .font(Style.eyebrow).tracking(1.6)
-                .foregroundStyle(Style.meta)
-            Toggle("Preview the upcoming edition", isOn: $showDraftIssue)
-                .font(Style.body).foregroundStyle(Style.ink)
-                .tint(Style.ink)
-                .onChange(of: showDraftIssue) {
-                    Task { await issueLoader.refresh() }
-                }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     private var signOut: some View {
         Button("Sign out") { Task { try? await account.signOut() } }
             .buttonStyle(.primary)
@@ -77,6 +58,5 @@ struct AccountView: View {
 }
 
 #Preview {
-    AccountView(account: AccountManager(db: DatabaseService()),
-                issueLoader: .preview(.loading))
+    AccountView(account: AccountManager(db: DatabaseService()))
 }

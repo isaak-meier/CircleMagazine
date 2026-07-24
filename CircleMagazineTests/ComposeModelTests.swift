@@ -57,6 +57,14 @@ private func oembedJSON(_ title: String) -> Data {
     try! JSONSerialization.data(withJSONObject: ["title": title])
 }
 
+/// A trimmed Instagram embed page: the EmbeddedMediaImage cover frame + the
+/// UsernameText handle, the two things InstagramEmbed pulls out.
+private let instaEmbedHTML = """
+<img class="EmbeddedMediaImage" alt="shared by &#064;infinite_mantra" \
+src="https://scontent.cdninstagram.com/v/t51/cover.jpg?stp=x&amp;oe=6A6754C8"/>
+<span class="UsernameText">infinite_mantra</span>
+"""
+
 /// Stub every oEmbed call with one fixed outcome.
 private func stubOEmbed(status: Int = 200, title: String = "Stub Title",
                         error: URLError? = nil, delay: TimeInterval = 0) {
@@ -84,10 +92,11 @@ private final class SpyDatabase: DatabaseService, @unchecked Sendable {
     /// Runs while post() is suspended mid-write — lets tests observe .posting.
     var onPost: (@Sendable () async -> Void)?
 
-    override func currentIssueId(live: Bool) async throws -> UUID? { stubbedCurrentIssueId }
+    override func currentIssueId(circleId: UUID) async throws -> UUID? { stubbedCurrentIssueId }
 
     override func createVideoPost(issueId: UUID, authorId: UUID, videoURL: URL, caption: String?,
-                                  captionStyle: CaptionStyle, cardShape: CardShape) async throws -> Page {
+                                  captionStyle: CaptionStyle, cardShape: CardShape,
+                                  insta: InstagramEmbed.Meta? = nil, posterFocus: Double? = nil) async throws -> Page {
         await onPost?()
         if let errorToThrow { throw errorToThrow }
         postCalls.append(PostCall(issueId: issueId, authorId: authorId, videoURL: videoURL,
@@ -104,6 +113,7 @@ struct ComposeModelTests {
     private let spy = SpyDatabase()
     private let author = Magazine.sample.pages[0].author!
     private let issueId = UUID()
+    private let circleId = UUID()
 
     private let watchLink = "https://www.youtube.com/watch?v=abc123XYZ00"
     private let parseError = "Paste a YouTube or Instagram link."
@@ -111,13 +121,15 @@ struct ComposeModelTests {
     init() {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
-        YouTubeOEmbed.session = URLSession(configuration: config)
+        let session = URLSession(configuration: config)
+        YouTubeOEmbed.session = session
+        InstagramEmbed.session = session   // insta resolve now scrapes the embed page
         StubURLProtocol.stubFor = nil
         StubURLProtocol.requested = false
     }
 
     private func makeModel(issueId: UUID?? = nil) -> ComposeModel {
-        ComposeModel(db: spy, issueId: issueId ?? self.issueId, author: author)
+        ComposeModel(db: spy, issueId: issueId ?? self.issueId, circleId: circleId, author: author)
     }
 
     /// startResolving and wait for that resolve pass to finish.
@@ -243,16 +255,18 @@ struct ComposeModelTests {
         #expect(model.resolved?.title == nil)
     }
 
-    // MARK: resolve — Instagram (no lookup)
+    // MARK: resolve — Instagram
 
-    @Test func instaReelResolvesInstantlyWithoutNetwork() async {
+    // A miss on the embed scrape (here: the default 500) still resolves the
+    // link — the poster is best-effort, so insta comes back nil, not blocked.
+    @Test func instaReelResolvesEvenWhenScrapeFails() async {
         let model = makeModel()
         model.linkText = "https://www.instagram.com/reel/CkLm123/"
         await resolveAndWait(model)
         #expect(model.resolved?.source == .insta(id: "CkLm123", kind: .reel))
         #expect(model.resolved?.title == nil)
         #expect(model.resolved?.shape == .tall)
-        #expect(!StubURLProtocol.requested)
+        #expect(model.resolved?.insta == nil)
     }
 
     @Test func instaPostResolvesAsSquare() async {
@@ -261,6 +275,17 @@ struct ComposeModelTests {
         await resolveAndWait(model)
         #expect(model.resolved?.source == .insta(id: "CkLm123", kind: .post))
         #expect(model.resolved?.shape == .square)
+    }
+
+    // The embed scrape feeds the cover frame + @handle into resolved.insta, so
+    // the compose preview (and the eventual post) get the real still.
+    @Test func instaResolvePopulatesPosterAndHandle() async {
+        StubURLProtocol.stubFor = { _ in .init(status: 200, body: Data(instaEmbedHTML.utf8)) }
+        let model = makeModel()
+        model.linkText = "https://www.instagram.com/reel/CkLm123/"
+        await resolveAndWait(model)
+        #expect(model.resolved?.insta?.handle == "infinite_mantra")
+        #expect(model.resolved?.insta?.posterURL.absoluteString.contains("cover.jpg") == true)
     }
 
     // MARK: task management

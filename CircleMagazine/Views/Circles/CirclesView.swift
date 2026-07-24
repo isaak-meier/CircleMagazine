@@ -195,8 +195,7 @@ enum ActiveSheet: Identifiable, Hashable {
 }
 
 struct CirclesView: View {
-    let db: DatabaseService
-    let account: AccountManager
+    let vm: CirclesViewModel
     /// False while another tab is showing — pauses the bubble simulation.
     var active = true
     /// Bubble tapped: the circle, its tone, and the tap point in the
@@ -207,20 +206,16 @@ struct CirclesView: View {
     /// join sheet opens with it.
     @Binding var joinCode: String?
 
-    enum LoadState { case loading, loaded([CircleSummary]), failed(String) }
-    @State private var state: LoadState
     @State private var sheetState: ActiveSheet?
     @State private var physics = BubblePhysics()
 
-    init(db: DatabaseService, account: AccountManager, active: Bool = true,
-         initial: LoadState = .loading, joinCode: Binding<String?> = .constant(nil),
+    init(vm: CirclesViewModel, active: Bool = true,
+         joinCode: Binding<String?> = .constant(nil),
          onEnter: @escaping (CircleSummary, CircleBubbleLayout.BubbleTone, CGPoint) -> Void) {
-        self.db = db
-        self.account = account
+        self.vm = vm
         self.active = active
         self.onEnter = onEnter
         _joinCode = joinCode
-        _state = State(initialValue: initial)
     }
 
     var body: some View {
@@ -229,7 +224,7 @@ struct CirclesView: View {
                 .overlay(alignment: .trailing) {
                     joinCreateMenu.padding(.trailing, Style.Space.lg)
                 }
-            switch state {
+            switch vm.state {
             case .loading:
                 Spacer()
                 ProgressView()
@@ -246,7 +241,7 @@ struct CirclesView: View {
             }
         }
         .background(Style.chrome)
-        .task { await load() }
+        .task { await vm.load() }
         .sheet(item: $sheetState) { sheet in
             switch sheet {
             case .create:
@@ -331,41 +326,17 @@ struct CirclesView: View {
         }
     }
 
-    @MainActor
-    private func load() async {
-        guard case .loading = state else { return }  // preview injected data
-        guard case .signedIn(let user) = account.authState else {
-            state = .failed("Sign in to see your circles.")
-            return
-        }
-        do {
-            state = .loaded(try await db.fetchCircles(memberOf: user.id))
-        } catch {
-            state = .failed("Couldn't load your circles — \(error.localizedDescription)")
-        }
-    }
-
-    /// Creates the circle and grows a new bubble for it in place. Throws so the
-    /// sheet can show the failure and keep the typed name for a retry.
+    // The VM owns the data; these thin wrappers just close the sheet on success.
+    // They rethrow so CircleFormSheet keeps the input and shows the error.
     @MainActor
     private func create(named name: String) async throws {
-        guard case .signedIn(let user) = account.authState else { return }
-        let circle = try await db.createCircle(name: name, creatorID: user.id)
-        if case .loaded(let circles) = state {
-            state = .loaded(circles + [CircleSummary(circle: circle, members: [user])])
-        }
+        try await vm.create(named: name)
         sheetState = nil
     }
 
-    /// Joins via invite code and grows the circle's bubble in place. Throws so
-    /// the sheet can show the failure (bad code, network) and keep the input.
     @MainActor
     private func join(code: String) async throws {
-        guard case .signedIn(let user) = account.authState else { return }
-        let summary = try await db.joinCircle(code: code, userId: user.id)
-        if case .loaded(let circles) = state, !circles.contains(where: { $0.id == summary.id }) {
-            state = .loaded(circles + [summary])
-        }
+        try await vm.join(code: code)
         sheetState = nil
     }
 }
@@ -669,9 +640,8 @@ private struct FloatingBackdrop: View {
                                      inviteCode: "ABC123"),
                       members: memberNames.map(user))
     }
-    let db = DatabaseService()
-    return CirclesView(db: db, account: AccountManager(db: db), initial: .loaded([
+    return CirclesView(vm: .preview(.loaded([
         circle("Dean", ["Dave Smith", "Arnell R", "Sawyer W", "Phil H", "Mia G", "Tom L"]),
         circle("Spiritual Miracles", ["Ben B", "Tom L", "Jess R"]),
-    ]), onEnter: { _, _, _ in })
+    ])), onEnter: { _, _, _ in })
 }

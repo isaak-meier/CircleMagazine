@@ -2,23 +2,20 @@
 //  CircleMembersView.swift
 //  CircleMagazine
 //
-//  The circle screen behind a bubble tap (standing in for chat, which is
-//  parked for now): the member roster split into who has submitted to this
-//  week's edition and who hasn't, plus the invite entry point.
+//  The circle's member roster, presented as a sheet from the circle magazine:
+//  who has submitted to this week's edition and who hasn't, plus the invite
+//  entry point. Binds to CircleViewModel — no direct DB access.
 //
 
 import SwiftUI
 
 struct CircleMembersView: View {
-    let db: DatabaseService
-    let summary: CircleSummary
+    let vm: CircleViewModel
     let tone: CircleBubbleLayout.BubbleTone
-    let me: User
     let onBack: () -> Void
 
-    /// nil while loading; ids of members with a page in the live issue after.
-    @State private var submitters: Set<UUID>?
-    @State private var loadError: String?
+    /// False until the submitter set has loaded; then read `vm.submitters`.
+    @State private var didLoad = false
     @State private var showInvite = false
 
     var body: some View {
@@ -27,8 +24,11 @@ struct CircleMembersView: View {
             content
         }
         .background(Style.chrome)
-        .sheet(isPresented: $showInvite) { InviteSheet(summary: summary) }
-        .task { await load() }
+        .sheet(isPresented: $showInvite) { InviteSheet(summary: vm.summary) }
+        .task {
+            await vm.loadSubmitters()
+            didLoad = true
+        }
     }
 
     // MARK: Header
@@ -41,7 +41,7 @@ struct CircleMembersView: View {
                     .foregroundStyle(Style.ink)
                     .frame(width: 30, alignment: .leading)
             }
-            Text(String(summary.name.prefix(1)))
+            Text(String(vm.name.prefix(1)))
                 .font(.system(size: 13, weight: .bold, design: .serif))
                 .foregroundStyle(tone.fg)
                 .frame(width: 34, height: 34)
@@ -50,10 +50,10 @@ struct CircleMembersView: View {
                                          center: UnitPoint(x: 0.34, y: 0.28),
                                          startRadius: 0, endRadius: 26)))
             VStack(alignment: .leading, spacing: 1) {
-                Text(summary.name)
+                Text(vm.name)
                     .font(.system(size: 16, weight: .bold, design: .serif))
                     .foregroundStyle(Style.ink)
-                Text("\(summary.members.count) member\(summary.members.count == 1 ? "" : "s")")
+                Text("\(vm.members.count) member\(vm.members.count == 1 ? "" : "s")")
                     .font(.system(size: 11)).foregroundStyle(Style.meta)
             }
             Spacer()
@@ -74,14 +74,11 @@ struct CircleMembersView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let submitters {
-            let submitted = summary.members.filter { submitters.contains($0.id) }
-            let pending = summary.members.filter { !submitters.contains($0.id) }
+        if didLoad {
+            let submitted = vm.members.filter { vm.submitters.contains($0.id) }
+            let pending = vm.members.filter { !vm.submitters.contains($0.id) }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if let loadError {
-                        ErrorBanner(message: loadError).padding(.top, Style.Space.md)
-                    }
                     if !submitted.isEmpty {
                         sectionHeader("SUBMITTED THIS WEEK", count: submitted.count)
                         ForEach(submitted, id: \.id) { memberRow($0, submitted: true) }
@@ -116,10 +113,10 @@ struct CircleMembersView: View {
         HStack(spacing: Style.Space.md) {
             avatar(user)
             HStack(spacing: 6) {
-                Text(user.username + (user.id == me.id ? " (you)" : ""))
+                Text(user.username + (user.id == vm.me.id ? " (you)" : ""))
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Style.ink)
-                if user.id == summary.circle.createdBy {
+                if user.id == vm.editorId {
                     Text("EDITOR")
                         .font(.system(size: 8, weight: .semibold)).tracking(1)
                         .foregroundStyle(Style.edition)
@@ -138,7 +135,7 @@ struct CircleMembersView: View {
     }
 
     private func avatar(_ user: User) -> some View {
-        let index = summary.members.firstIndex { $0.id == user.id } ?? 0
+        let index = vm.members.firstIndex { $0.id == user.id } ?? 0
         let colors: [Color] = [Color(hex: 0x3E6E8E), Color(hex: 0x8E5A3E),
                                Color(hex: 0x4A7A52), Color(hex: 0x6A5A8E)]
         let words = user.username.split(separator: " ")
@@ -150,15 +147,6 @@ struct CircleMembersView: View {
             .foregroundStyle(.white)
             .frame(width: 30, height: 30)
             .background(SwiftUI.Circle().fill(colors[index % colors.count]))
-    }
-
-    private func load() async {
-        do {
-            submitters = try await db.submitterIds(among: summary.members.map(\.id))
-        } catch {
-            loadError = "Couldn't load submissions — \(error.localizedDescription)"
-            submitters = []  // fall back to everyone in "not yet"
-        }
     }
 }
 
@@ -175,6 +163,7 @@ struct CircleMembersView: View {
         circle: Circle(id: UUID(), name: "Dean St.", createdBy: arnell.id, createdAt: nil,
                        inviteCode: "ABC123"),
         members: [dave, arnell, sawyer, me])
-    return CircleMembersView(db: DatabaseService(), summary: summary,
-                             tone: CircleBubbleLayout.slots[0].tone, me: me, onBack: {})
+    let vm = CircleViewModel(summary: summary, db: DatabaseService(), me: me,
+                             issue: .preview(.loading))
+    return CircleMembersView(vm: vm, tone: CircleBubbleLayout.slots[0].tone, onBack: {})
 }

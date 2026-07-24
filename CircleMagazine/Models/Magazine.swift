@@ -42,7 +42,7 @@ extension Magazine {
         }
         func media(_ type: String, url: String? = nil, text: String? = nil, _ pos: Int) -> PageMedia {
             PageMedia(id: UUID(), pageId: nil, mediaUrl: url, mediaType: type,
-                      textContent: text, position: pos, createdAt: nil)
+                      textContent: text, posterUrl: nil, posterFocus: nil, position: pos, createdAt: nil)
         }
         let philly = User(
             id: UUID(), username: "Philly Bum Bum", bio: nil,
@@ -50,7 +50,7 @@ extension Magazine {
             isVerified: nil, createdAt: nil)
         let videoCard = MagazinePage(
             page: page(title: "I Spent 3 Weeks Living Off-Grid in the Mountains",
-                       caption: "This shit is SO DOPE!!", style: .inkBand),
+                       caption: "This shit is SO DOPE!!", style: .paperPlate),
             pageMedia: [media("video", url: "https://www.youtube.com/watch?v=62bIsvRcPv0", 0)],
             author: philly)
         let jack = User(
@@ -63,7 +63,7 @@ extension Magazine {
             pageMedia: [media("video", url: "https://www.youtube.com/watch?v=dslLBsHkVzE", 0)],
             author: jack)
         let instaCard = MagazinePage(
-            page: page(title: "A Reel Worth Sharing",
+            page: page(title: "",
                        caption: "first reel on Circle 🎬"),
             pageMedia: [media("video", url: "https://www.instagram.com/reels/DZ30GywAbc7/", 0)],
             author: jack)
@@ -98,8 +98,9 @@ extension Magazine {
             media("text", text: "Field notes from a long walk.", 3),
         ])
         return Magazine(
-            issue: Issue(id: issueId, publishDate: "2026-06-22", isLive: true, createdAt: nil),
-            pages: [instaCard, videoCard, videoCard2, spread1, spread2],
+            issue: Issue(id: issueId, circleId: UUID(), publishDate: "2026-06-22", isLive: true, createdAt: nil),
+            pages: [videoCard, instaCard],
+//            pages: [instaCard, videoCard, videoCard2, spread1, spread2],
         )
     }()
 }
