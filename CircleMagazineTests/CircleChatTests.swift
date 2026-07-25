@@ -35,6 +35,13 @@ struct CircleChatTests {
         #expect(EditionCountdown.string(from: date(2026, 7, 5), calendar: cal) == "7d 00h 00m")
     }
 
+    // A draft's publish_date is the Saturday it closes on, NOT the Sunday
+    // midnight the countdown runs to — an off-by-one here misdates the edition.
+    @Test func publishDayIsTheSaturdayNotTheMidnightAfter() {
+        #expect(EditionCountdown.publishDay(after: date(2026, 7, 1, 12), calendar: cal)
+                == date(2026, 7, 4))
+    }
+
     @Test func runFlagsGroupByAuthorAcrossEvents() {
         func user() -> User {
             User(id: UUID(), username: "u", bio: nil, avatarUrl: nil, role: nil,

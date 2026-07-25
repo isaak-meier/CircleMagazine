@@ -23,6 +23,18 @@ struct PageInsert: Encodable {
     }
 }
 
+/// A new draft edition. `is_live` is omitted on purpose — the column defaults
+/// to false, and only publishing flips it.
+struct IssueInsert: Encodable {
+    let circleId: UUID
+    let publishDate: String
+
+    enum CodingKeys: String, CodingKey {
+        case circleId = "circle_id"
+        case publishDate = "publish_date"
+    }
+}
+
 struct CircleInsert: Encodable {
     let name: String
     let createdBy: UUID

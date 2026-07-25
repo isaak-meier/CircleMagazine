@@ -85,14 +85,20 @@ private final class SpyDatabase: DatabaseService, @unchecked Sendable {
         let cardShape: CardShape
     }
 
+    struct NoEdition: Error {}
+
     var postCalls: [PostCall] = []
     var errorToThrow: Error?
-    /// What post()'s self-serve issue lookup finds when the model has no issueId.
-    var stubbedCurrentIssueId: UUID?
+    /// The edition post()'s self-serve lookup lands on when the model has no
+    /// issueId. nil ⇒ the lookup throws, as it does when RLS blocks opening a draft.
+    var stubbedSubmissionIssueId: UUID?
     /// Runs while post() is suspended mid-write — lets tests observe .posting.
     var onPost: (@Sendable () async -> Void)?
 
-    override func currentIssueId(circleId: UUID) async throws -> UUID? { stubbedCurrentIssueId }
+    override func issueIdForSubmission(circleId: UUID) async throws -> UUID {
+        guard let stubbedSubmissionIssueId else { throw NoEdition() }
+        return stubbedSubmissionIssueId
+    }
 
     override func createVideoPost(issueId: UUID, authorId: UUID, videoURL: URL, caption: String?,
                                   captionStyle: CaptionStyle, cardShape: CardShape,
@@ -386,22 +392,23 @@ struct ComposeModelTests {
     @Test func postWithoutAnyIssueAnywhereSetsError() async {
         stubOEmbed()
         let model = makeModel(issueId: .some(nil))   // feed had nothing…
-        spy.stubbedCurrentIssueId = nil              // …and neither does the DB
+        spy.stubbedSubmissionIssueId = nil           // …and the DB can't open one either
         model.linkText = watchLink
         await resolveAndWait(model)
         await model.post()
-        #expect(model.errorText == "No live edition to post to yet — try again in a moment.")
+        #expect(model.errorText == "Couldn't open this week's edition — try again in a moment.")
         #expect(model.phase == .editing)
         #expect(spy.postCalls.isEmpty)
     }
 
     /// Regression: a failed feed load used to grey out Post forever — the model
-    /// now asks the DB for the live edition itself.
+    /// now asks the DB which edition to post into itself. That lookup also covers
+    /// the compose phase, where nothing is live and a draft gets opened.
     @Test func postSelfFetchesIssueIdWhenFeedCouldNot() async {
         stubOEmbed()
         let fetched = UUID()
         let model = makeModel(issueId: .some(nil))
-        spy.stubbedCurrentIssueId = fetched
+        spy.stubbedSubmissionIssueId = fetched
         model.linkText = watchLink
         await resolveAndWait(model)
         await model.post()
@@ -451,5 +458,174 @@ struct ComposeModelTests {
         #expect(model.phase == .editing)
         #expect(model.errorText?.contains("row level security") == true)
         #expect(model.canPost)   // recoverable: user can retry
+    }
+
+    // MARK: post — guards and idempotence
+
+    /// Nothing resolved means nothing to post; the guard exits before the phase
+    /// or the DB is touched.
+    @Test func postWithNothingResolvedIsANoOp() async {
+        let model = makeModel()
+        await model.post()
+        #expect(model.phase == .editing)
+        #expect(model.errorText == nil)
+        #expect(spy.postCalls.isEmpty)
+    }
+
+    /// Double-tapping Post must not write the card twice — the phase guard is
+    /// the only thing standing between a jumpy thumb and a duplicate page.
+    @Test func postingTwiceWritesOnlyOnce() async {
+        stubOEmbed()
+        let model = makeModel()
+        model.linkText = watchLink
+        await resolveAndWait(model)
+        await model.post()
+        await model.post()
+        #expect(spy.postCalls.count == 1)
+        #expect(model.phase == .posted)
+    }
+
+    /// A retry after a failure goes through — the failure path restores .editing
+    /// precisely so the guard lets the second attempt run.
+    @Test func postRetryAfterFailureSucceeds() async {
+        stubOEmbed()
+        let model = makeModel()
+        model.linkText = watchLink
+        await resolveAndWait(model)
+        spy.errorToThrow = NSError(domain: "test", code: 1)
+        await model.post()
+        #expect(spy.postCalls.isEmpty)
+        spy.errorToThrow = nil
+        await model.post()
+        #expect(spy.postCalls.count == 1)
+        #expect(model.phase == .posted)
+    }
+
+    /// The self-serve lookup runs once; a retry reuses the id it landed on
+    /// rather than opening a second draft.
+    @Test func postDoesNotRepeatTheEditionLookupOnRetry() async {
+        stubOEmbed()
+        let found = UUID()
+        let model = makeModel(issueId: .some(nil))
+        spy.stubbedSubmissionIssueId = found
+        model.linkText = watchLink
+        await resolveAndWait(model)
+        spy.errorToThrow = NSError(domain: "test", code: 1)
+        await model.post()                     // lookup happens, write fails
+        spy.errorToThrow = nil
+        spy.stubbedSubmissionIssueId = UUID()  // a different answer, if asked again
+        await model.post()
+        #expect(spy.postCalls.first?.issueId == found)
+    }
+
+    /// A whitespace-only caption is still "no note" as far as the DB is
+    /// concerned — but the model posts what it was given, so this pins today's
+    /// behaviour rather than a trimmed one.
+    @Test func postSendsAWhitespaceCaptionAsTyped() async {
+        stubOEmbed()
+        let model = makeModel()
+        model.linkText = watchLink
+        await resolveAndWait(model)
+        model.caption = "   "
+        await model.post()
+        #expect(spy.postCalls.first?.caption == "   ")
+    }
+
+    @Test func postCarriesTheChosenPosterCrop() async {
+        StubURLProtocol.stubFor = { _ in .init(status: 200, body: Data(instaEmbedHTML.utf8)) }
+        let model = makeModel()
+        model.linkText = "https://www.instagram.com/reel/CkLm123/"
+        await resolveAndWait(model)
+        model.posterFocus = 0.15
+        await model.post()
+        #expect(spy.postCalls.count == 1)
+        #expect(spy.postCalls.first?.cardShape == .square || spy.postCalls.first?.cardShape == .tall)
+    }
+
+    // MARK: clearLink — full reset
+
+    @Test func clearLinkAlsoResetsTheCropButKeepsTheCaption() async {
+        stubOEmbed()
+        let model = makeModel()
+        model.linkText = watchLink
+        await resolveAndWait(model)
+        model.posterFocus = 0.1
+        model.caption = "kept"
+        model.clearLink()
+        #expect(model.posterFocus == 0.5)
+        #expect(model.caption == "kept")   // the note survives swapping the link
+    }
+
+    @Test func clearLinkOnAnUntouchedModelIsHarmless() {
+        let model = makeModel()
+        model.clearLink()
+        #expect(model.linkText.isEmpty)
+        #expect(model.resolved == nil)
+        #expect(model.errorText == nil)
+        #expect(!model.canPost)
+    }
+
+    /// Clearing after a dead-link error wipes the message, so the field doesn't
+    /// keep scolding you about a link you already removed.
+    @Test func clearLinkWipesAResolveError() async {
+        stubOEmbed(status: 404)
+        let model = makeModel()
+        model.linkText = watchLink
+        await resolveAndWait(model)
+        #expect(model.errorText != nil)
+        model.clearLink()
+        #expect(model.errorText == nil)
+    }
+
+    // MARK: cancelResolving
+
+    @Test func cancelBeforeAnyFetchIsHarmless() {
+        let model = makeModel()
+        model.cancelResolving()
+        #expect(!model.isResolving)
+        #expect(model.resolveTask == nil)
+    }
+
+    /// Cancelling then pasting again must still resolve — the generation bump
+    /// mustn't orphan the *next* pass too.
+    @Test func resolvingWorksAgainAfterACancel() async {
+        stubOEmbed(delay: 2)
+        let model = makeModel()
+        model.linkText = watchLink
+        model.startResolving()
+        let cancelled = model.resolveTask!
+        model.cancelResolving()
+        await cancelled.value
+
+        stubOEmbed(title: "second try")
+        await resolveAndWait(model)
+        #expect(model.resolved?.title == "second try")
+        #expect(!model.isResolving)
+    }
+
+    @Test func cancelAfterAResolveLeavesTheResolvedLinkPostable() async {
+        stubOEmbed()
+        let model = makeModel()
+        model.linkText = watchLink
+        await resolveAndWait(model)
+        model.cancelResolving()
+        #expect(model.resolved != nil)
+        #expect(model.canPost)
+    }
+
+    // MARK: Defaults
+
+    @Test func aFreshModelIsEmptyAndEditing() {
+        let model = makeModel()
+        #expect(model.linkText.isEmpty)
+        #expect(model.caption.isEmpty)
+        #expect(model.captionStyle == .paperPlate)
+        #expect(model.posterFocus == 0.5)
+        #expect(model.resolved == nil)
+        #expect(model.errorText == nil)
+        #expect(!model.isResolving)
+        #expect(model.phase == .editing)
+        #expect(!model.canPost)
+        #expect(model.author.id == author.id)
     }
 }

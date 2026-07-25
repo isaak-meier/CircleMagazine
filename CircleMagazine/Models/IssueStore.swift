@@ -10,6 +10,9 @@ import Foundation
 enum IssueLoadState {
   case loading
   case loaded(Magazine)
+  /// The compose phase: nothing is live for this circle, the next edition is
+  /// being assembled. A phase, not a failure — the circle shows its chat.
+  case composing
   case failedToLoad(error: String)
 }
 
@@ -39,7 +42,12 @@ final class IssueStore {
   /// an already-loaded magazine stays on screen until the new one arrives.
   func refresh(circleId: UUID) async {
     do {
-      issueLoadStates[circleId] = .loaded(try await db.fetchCurrentIssue(circleId: circleId))
+      // nil = nothing live = the compose phase. Only a thrown error is a failure.
+      if let magazine = try await db.fetchCurrentIssue(circleId: circleId) {
+        issueLoadStates[circleId] = .loaded(magazine)
+      } else {
+        issueLoadStates[circleId] = .composing
+      }
     } catch {
       issueLoadStates[circleId] = .failedToLoad(error: error.localizedDescription)
     }

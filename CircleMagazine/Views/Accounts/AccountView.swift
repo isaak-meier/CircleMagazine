@@ -11,6 +11,8 @@ import SwiftUI
 struct AccountView: View {
     let account: AccountManager
 
+    @AppStorage(IssueViewModel.forceComposeKey) private var forceCompose = false
+
     var body: some View {
         VStack(spacing: 0) {
             Masthead(title: "Account")
@@ -18,6 +20,9 @@ struct AccountView: View {
                 switch account.authState {
                 case .signedIn(let user):
                     profile(user)
+                    #if DEBUG
+                    developer
+                    #endif
                     Spacer()
                     signOut
                 case .loading, .signedOut:
@@ -43,6 +48,25 @@ struct AccountView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    #if DEBUG
+    /// Debug-only phase switch. Flips the SCREEN, not the `is_live` column —
+    /// a real flip needs an UPDATE policy on `issues` (there isn't one, so the
+    /// write would silently touch zero rows). Takes effect on re-entering a circle.
+    private var developer: some View {
+        VStack(alignment: .leading, spacing: Style.Space.xs) {
+            Text("DEVELOPER")
+                .font(Style.eyebrow).tracking(1.6)
+                .foregroundStyle(Style.meta)
+            Toggle("Force compose phase", isOn: $forceCompose)
+                .font(Style.body)
+                .foregroundStyle(Style.ink)
+            Text("Shows the circle chat instead of the edition.")
+                .font(Style.stamp).foregroundStyle(Style.meta)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    #endif
 
     private var signOut: some View {
         Button("Sign out") { Task { try? await account.signOut() } }

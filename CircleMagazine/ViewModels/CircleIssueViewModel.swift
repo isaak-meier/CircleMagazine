@@ -21,8 +21,18 @@ final class IssueViewModel {
     self.me = me
   }
 
+  /// Debug override from Account → forces the compose phase whatever the DB
+  /// says, so both circle screens can be exercised without flipping `is_live`.
+  /// Re-read on `appear()`, so toggling it lands when you re-enter a circle.
+  static let forceComposeKey = "debug.forceComposePhase"
+  private var forcedCompose = UserDefaults.standard.bool(forKey: forceComposeKey)
+
   /// This circle's edition, straight from the shared cache.
-  var state: IssueLoadState { store.state(for: circleId) }
+  /// Both halves default to the harmless answer: an unset key reads `false`, so
+  /// the override is off until someone flips it, and a circle the store hasn't
+  /// heard of reads `.loading` — never `.composing`, never a failure. So a VM
+  /// built before its first fetch shows the spinner, not the wrong phase.
+  var state: IssueLoadState { forcedCompose ? .composing : store.state(for: circleId) }
 
   /// The live issue's id once loaded — nil while loading/failed. Compose needs it.
   var liveIssueId: UUID? {
@@ -30,7 +40,10 @@ final class IssueViewModel {
     return nil
   }
 
-  func appear() async  { await store.refreshIfNeeded(circleId: circleId) }
+  func appear() async {
+    forcedCompose = UserDefaults.standard.bool(forKey: Self.forceComposeKey)
+    await store.refreshIfNeeded(circleId: circleId)
+  }
   func refresh() async { await store.refresh(circleId: circleId) }
 
   /// Delete is a command — the view calls this, the VM talks to the Model.

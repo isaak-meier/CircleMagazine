@@ -35,6 +35,7 @@ final class ViewModelFactory {
     /// no fetch, no async.
     func makeCircleVM(_ summary: CircleSummary, me: User) -> CircleViewModel {
         let issue = IssueViewModel(store: store, circleId: summary.circle.id, me: me)
-        return CircleViewModel(summary: summary, db: db, me: me, issue: issue)
+        let chat = ChatViewModel(db: db, summary: summary, me: me)
+        return CircleViewModel(summary: summary, db: db, me: me, issue: issue, chat: chat)
     }
 }

@@ -36,6 +36,10 @@ struct CardFeedView: View {
                     emptyEdition
                 case .loaded(let magazine):
                     viewport(for: magazine)
+                // The circle screen routes the compose phase to the chat before
+                // it gets here; this is the standalone-feed fallback.
+                case .composing:
+                    emptyEdition
                 case .failedToLoad(let errorStr):
                     Spacer()
                     VStack(spacing: Style.Space.md) {

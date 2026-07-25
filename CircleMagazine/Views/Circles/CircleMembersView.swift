@@ -163,7 +163,9 @@ struct CircleMembersView: View {
         circle: Circle(id: UUID(), name: "Dean St.", createdBy: arnell.id, createdAt: nil,
                        inviteCode: "ABC123"),
         members: [dave, arnell, sawyer, me])
-    let vm = CircleViewModel(summary: summary, db: DatabaseService(), me: me,
-                             issue: .preview(.loading))
+    let db = DatabaseService()
+    let vm = CircleViewModel(summary: summary, db: db, me: me,
+                             issue: .preview(.loading),
+                             chat: ChatViewModel(db: db, summary: summary, me: me))
     return CircleMembersView(vm: vm, tone: CircleBubbleLayout.slots[0].tone, onBack: {})
 }

@@ -1,0 +1,9 @@
+schemaVersion: 1
+sessionDefaults:
+  projectPath: /Users/isaak/Local System/Super
+    Code/Git/CircleMagazine/CircleMagazine.xcodeproj
+  scheme: CircleMagazine
+  configuration: Debug
+  simulatorName: iPhone 17 Pro
+  simulatorId: 2E0EE486-D6B7-4CD0-93A8-5AA1B7241426
+  simulatorPlatform: iOS Simulator

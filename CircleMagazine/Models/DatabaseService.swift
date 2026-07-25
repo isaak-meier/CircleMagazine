@@ -12,11 +12,6 @@ import os
 
 private let oembedLog = Logger(subsystem: "CircleMagazine", category: "oembed")
 
-enum IssueError: LocalizedError {
-  case emptyData
-  var errorDescription: String? { "Issues, pages, or pageMedia was empty" }
-}
-
 enum JoinError: LocalizedError {
   case badCode
   var errorDescription: String? { "No circle found with that invite code." }
@@ -29,6 +24,71 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
     supabaseURL: Config.supabaseURL,
     supabaseKey: Config.supabaseAnonKey
   )
+
+  /// `@MainActor` + approachable concurrency would give this an *isolated*
+  /// deinit, which traps if the last reference is dropped off the main actor —
+  /// exactly what happens when a test suite struct holding one is destroyed
+  /// (the test target has no MainActor default isolation). Nothing here needs
+  /// the main actor to tear down; the client releases fine from any thread.
+  nonisolated deinit {}
+
+  // MARK: - Auth
+
+  /// The session events the account layer acts on, narrowed from Supabase's
+  /// stream. Wrapping it here is what keeps `AccountManager` off the SDK — a
+  /// test can subclass and hand back a stream it drives by hand.
+  enum AuthChange {
+    /// Launch/restore. `hasSession` false means nobody is signed in.
+    case restored(hasSession: Bool)
+    case signedOut
+  }
+
+  /// Cancels its upstream task when the consumer stops iterating.
+  func authChanges() -> AsyncStream<AuthChange> {
+    AsyncStream { continuation in
+      let task = Task {
+        for await change in supabase.auth.authStateChanges {
+          switch change.event {
+          case .initialSession: continuation.yield(.restored(hasSession: change.session != nil))
+          case .signedOut:      continuation.yield(.signedOut)
+          default: break   // .signedIn is driven explicitly by the sign-in flow
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+
+  /// Emails a one-time code, creating the auth user if this address is new.
+  func sendOTP(email: String) async throws {
+    try await supabase.auth.signInWithOTP(email: email)   // shouldCreateUser defaults true
+  }
+
+  func verifyOTP(email: String, code: String) async throws {
+    try await supabase.auth.verifyOTP(email: email, token: code, type: .email)
+  }
+
+  func signOut() async throws {
+    try await supabase.auth.signOut()
+  }
+
+  func currentUserId() async throws -> UUID {
+    try await supabase.auth.session.user.id
+  }
+
+  /// The signed-in user's profile row — nil when the auth user exists but
+  /// hasn't picked a username yet (mid-signup).
+  func currentProfile() async throws -> User? {
+    let uid = try await currentUserId()
+    let rows: [User] = try await supabase.from("users")
+      .select().eq("id", value: uid.uuidString).limit(1).execute().value
+    return rows.first
+  }
+
+  func createProfile(userId: UUID, username: String) async throws {
+    try await supabase.from("users").insert(UserInsert(id: userId, username: username)).execute()
+  }
 
   // MARK: - Reads
 
@@ -54,16 +114,16 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
     }
   }
 
-  /// The current issue with its pages (ordered) and each page's widgets
-  /// (ordered by position). `live: false` fetches the newest draft instead —
-  /// the Account screen's edition-preview toggle.
+  /// The circle's live issue with its pages (ordered) and each page's widgets
+  /// (ordered by position), or **nil during the compose phase** — nothing is
+  /// live, which is a normal half of the week, not a failure.
   /// could be optimzed for multiple async server calls TODO
-  func fetchCurrentIssue(circleId: UUID) async throws -> Magazine {
+  func fetchCurrentIssue(circleId: UUID) async throws -> Magazine? {
 
     let issues: [Issue] = try await supabase.from("issues")
       .select().eq("is_live", value: true).eq("circle_id", value: circleId.uuidString)
       .order("created_at", ascending: false).limit(1).execute().value
-    guard let issue = issues.first else { throw IssueError.emptyData }
+    guard let issue = issues.first else { return nil }
 
     let pages: [Page] = try await supabase.from("pages")
       .select().eq("issue_id", value: issue.id.uuidString)
@@ -97,6 +157,42 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
   func currentIssueId(circleId: UUID) async throws -> UUID? {
     let issues: [Issue] = try await supabase.from("issues")
       .select().eq("is_live", value: true).eq("circle_id", value: circleId.uuidString)
+      .order("created_at", ascending: false).limit(1).execute().value
+    return issues.first?.id
+  }
+
+  /// The edition a submission belongs in: the live one if the week has already
+  /// published, otherwise the draft being assembled — created on this circle's
+  /// first submission of the week. Compose calls this instead of
+  /// `currentIssueId` so the compose phase isn't a dead end.
+  func issueIdForSubmission(circleId: UUID) async throws -> UUID {
+    if let live = try await currentIssueId(circleId: circleId) { return live }
+    if let draft = try await draftIssueId(circleId: circleId) { return draft }
+    do {
+      return try await createDraftIssue(circleId: circleId)
+    } catch {
+      // Lost the race to another member's first submission — the one-draft-per-
+      // circle index rejected our insert, so post into the draft they just made.
+      guard let draft = try await draftIssueId(circleId: circleId) else { throw error }
+      return draft
+    }
+  }
+
+  /// Opens this circle's next edition, stamped with the Saturday it closes on.
+  /// Separate from `issueIdForSubmission` so the orchestration above (and its
+  /// lost-the-race branch) can be exercised without a live database.
+  func createDraftIssue(circleId: UUID) async throws -> UUID {
+    let created: Issue = try await supabase.from("issues")
+      .insert(IssueInsert(circleId: circleId,
+                          publishDate: Issue.publishDate(for: EditionCountdown.publishDay())))
+      .select().single().execute().value
+    return created.id
+  }
+
+  /// The circle's newest unpublished edition, if one is already open.
+  func draftIssueId(circleId: UUID) async throws -> UUID? {
+    let issues: [Issue] = try await supabase.from("issues")
+      .select().eq("is_live", value: false).eq("circle_id", value: circleId.uuidString)
       .order("created_at", ascending: false).limit(1).execute().value
     return issues.first?.id
   }

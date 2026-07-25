@@ -110,6 +110,10 @@ extension Issue {
         return Self.editionFormatter.string(from: date).uppercased()
     }
 
+    /// A day in `publish_date`'s wire format ("2026-06-17"). Same formatter as
+    /// the parser, so writing and reading can't drift apart.
+    static func publishDate(for date: Date) -> String { dateParser.string(from: date) }
+
     private static let dateParser: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -122,6 +126,38 @@ extension Issue {
         f.dateFormat = "MMMM d, yyyy"
         return f
     }()
+}
+
+/// When an edition closes: the end of Saturday, rolling to next week once
+/// passed. A domain rule — the chat renders it as a countdown, and opening a
+/// draft stamps its `publish_date` from it, so it can't live in either one.
+/// ponytail: hardcoded weekly cadence. Move to a per-circle schedule column
+/// when circles want their own rhythm.
+enum EditionCountdown {
+    static func deadline(after now: Date, calendar: Calendar = .current) -> Date {
+        let weekday = calendar.component(.weekday, from: now)  // 1 = Sunday … 7 = Saturday
+        let toSaturday = (7 - weekday + 7) % 7
+        let saturday = calendar.startOfDay(for: calendar.date(byAdding: .day, value: toSaturday, to: now)!)
+        let deadline = calendar.date(byAdding: .day, value: 1, to: saturday)!
+        return deadline > now ? deadline : calendar.date(byAdding: .day, value: 7, to: deadline)!
+    }
+
+    /// The Saturday an edition opened now would publish on — the deadline is
+    /// the midnight *after* it, so step back a day to name the day itself.
+    static func publishDay(after now: Date = .now, calendar: Calendar = .current) -> Date {
+        calendar.date(byAdding: .day, value: -1,
+                      to: deadline(after: now, calendar: calendar))!
+    }
+
+    /// "2d 05h 41m", or "05h 41m 12s" inside the final day.
+    static func string(from now: Date, calendar: Calendar = .current) -> String {
+        var s = Int(deadline(after: now, calendar: calendar).timeIntervalSince(now).rounded())
+        let d = s / 86_400; s %= 86_400
+        let h = s / 3_600; s %= 3_600
+        let m = s / 60; s %= 60
+        func pad(_ n: Int) -> String { String(format: "%02d", n) }
+        return d > 0 ? "\(d)d \(pad(h))h \(pad(m))m" : "\(pad(h))h \(pad(m))m \(pad(s))s"
+    }
 }
 
 struct PageMedia: Codable, Identifiable {

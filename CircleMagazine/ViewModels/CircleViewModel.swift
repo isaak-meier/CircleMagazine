@@ -17,13 +17,18 @@ final class CircleViewModel {
   let summary: CircleSummary
   private let db: DatabaseService
   let me: User
+  /// The two phases of a circle, one child VM each: the published edition and
+  /// the chat the week is assembled in. `issue.state` picks which one shows.
   let issue: IssueViewModel
+  let chat: ChatViewModel
 
-  init(summary: CircleSummary, db: DatabaseService, me: User, issue: IssueViewModel) {
+  init(summary: CircleSummary, db: DatabaseService, me: User,
+       issue: IssueViewModel, chat: ChatViewModel) {
     self.summary = summary
     self.db = db
     self.me = me
     self.issue = issue
+    self.chat = chat
   }
 
   var circleId: UUID     { summary.circle.id }

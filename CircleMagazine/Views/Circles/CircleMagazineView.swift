@@ -21,9 +21,8 @@ struct CircleMagazineView: View {
     @State private var composing = false
 
     var body: some View {
-        CardFeedView(vm: vm.issue, me: vm.me, title: vm.name,
-                     mastheadLeading: AnyView(backButton),
-                     mastheadTrailing: AnyView(controls))
+        phase
+            .task { await vm.issue.appear() }
             .sheet(isPresented: $showMembers) {
                 CircleMembersView(vm: vm, tone: tone) { showMembers = false }
             }
@@ -33,6 +32,24 @@ struct CircleMagazineView: View {
                     await vm.issue.refresh()   // show the new post
                 }
             }
+    }
+
+    /// Entering a circle renders its CURRENT PHASE, not an empty state: a live
+    /// edition is the magazine, otherwise the week is still being assembled and
+    /// the circle is its chat.
+    /// ponytail: chat IS the compose screen for now — no submission staging,
+    /// no "who's contributed" roster in the thread. Build those when the
+    /// compose phase needs to do more than talk.
+    @ViewBuilder private var phase: some View {
+        if case .composing = vm.issue.state {
+            CircleChatView(vm: vm.chat, tone: tone, onBack: onBack,
+                           onMembers: { showMembers = true },
+                           onCompose: { composing = true })
+        } else {
+            CardFeedView(vm: vm.issue, me: vm.me, title: vm.name,
+                         mastheadLeading: AnyView(backButton),
+                         mastheadTrailing: AnyView(controls))
+        }
     }
 
     private var backButton: some View {
@@ -66,7 +83,9 @@ struct CircleMagazineView: View {
         circle: Circle(id: UUID(), name: "Dean St.", createdBy: me.id, createdAt: nil,
                        inviteCode: "ABC123"),
         members: [me])
-    let vm = CircleViewModel(summary: summary, db: DatabaseService(), me: me,
-                             issue: .preview(.loaded(Magazine.sample)))
+    let db = DatabaseService()
+    let vm = CircleViewModel(summary: summary, db: db, me: me,
+                             issue: .preview(.loaded(Magazine.sample)),
+                             chat: ChatViewModel(db: db, summary: summary, me: me))
     return CircleMagazineView(vm: vm, tone: CircleBubbleLayout.slots[0].tone, onBack: {})
 }

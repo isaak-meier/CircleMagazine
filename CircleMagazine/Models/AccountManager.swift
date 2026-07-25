@@ -44,58 +44,51 @@ final class AccountManager {
   // MARK: - Session
 
   private func listen() async {
-    for await change in db.supabase.auth.authStateChanges {
-      switch change.event {
-      case .initialSession: await evaluate(change.session)  // launch / restore
-      case .signedOut:      authState = .signedOut
-      default: break  // .signedIn is driven explicitly by the flow below
+    for await change in db.authChanges() {
+      switch change {
+      case .restored(let hasSession): await evaluate(hasSession: hasSession)
+      case .signedOut:                authState = .signedOut
       }
     }
   }
 
-  private func evaluate(_ session: Session?) async {
-    guard session != nil else { authState = .signedOut; return }
+  private func evaluate(hasSession: Bool) async {
+    guard hasSession else { authState = .signedOut; return }
     // ponytail: session-but-no-profile (app killed mid-signup) falls back to signedOut → re-OTP. Rare; add a .needsProfile state if it bites.
-    if let user = try? await fetchProfile() { authState = .signedIn(user) }
+    if let user = try? await db.currentProfile() { authState = .signedIn(user) }
     else { authState = .signedOut }
   }
 
-  private func fetchProfile() async throws -> User? {
-    let uid = try await db.supabase.auth.session.user.id
-    let rows: [User] = try await db.supabase.from("users")
-      .select().eq("id", value: uid.uuidString).limit(1).execute().value
-    return rows.first
-  }
-
   func signOut() async throws {
-    try await db.supabase.auth.signOut()  // listener flips authState to .signedOut
+    try await db.signOut()  // listener flips authState to .signedOut
   }
 
   // MARK: - Sign-in flow
 
   func sendCode() async {
     await run {
-      try await self.db.supabase.auth.signInWithOTP(email: self.email)  // shouldCreateUser defaults true
+      try await self.db.sendOTP(email: self.email)
       self.step = .code
     }
   }
 
   func resendCode() async {
-    await run { try await self.db.supabase.auth.signInWithOTP(email: self.email) }
+    await run { try await self.db.sendOTP(email: self.email) }
   }
 
   func verify() async {
     await run {
-      try await self.db.supabase.auth.verifyOTP(email: self.email, token: self.code, type: .email)
-      if let user = try await self.fetchProfile() { self.authState = .signedIn(user) } else { self.step = .username }
+      try await self.db.verifyOTP(email: self.email, code: self.code)
+      if let user = try await self.db.currentProfile() { self.authState = .signedIn(user) }
+      else { self.step = .username }
     }
   }
 
   func createAccount() async {
     await run {
-      let userId = try await self.db.supabase.auth.session.user.id
-      try await self.db.supabase.from("users").insert(UserInsert(id: userId, username: self.username)).execute()
-      guard let user = try await self.fetchProfile() else { throw AccountError.profileMissingAfterCreate }
+      let userId = try await self.db.currentUserId()
+      try await self.db.createProfile(userId: userId, username: self.username)
+      guard let user = try await self.db.currentProfile() else { throw AccountError.profileMissingAfterCreate }
       self.authState = .signedIn(user)
     }
   }
