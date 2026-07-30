@@ -12,16 +12,16 @@ import SwiftUI
 // Tune to taste — smaller height (bigger number) makes the reel card shorter.
 private let instaReelAspect: CGFloat = 1.0
 
-// Video card: media sized by CardShape (full-bleed for tall, top-pinned for
-// wide/square), author chip top-left, title treatment driven by CaptionStyle.
+// Video card: media sized to the source's own shape, author chip top-left,
+// title treatment driven by CaptionStyle.
 // Rendered only via CardView — Compose previews through CardView too.
 struct VideoCard: View {
     let source: VideoSource
+    var cardShape: CardShape = .tall
     let author: User?
     let caption: String?
     let title: String?
     var captionStyle: CaptionStyle = .paperPlate
-    var cardShape: CardShape = .tall
     /// 1a's Comment button opens the comments sheet (wired by CardView). Nil in
     /// previews, where the button is inert.
     var onComment: (() -> Void)? = nil
@@ -32,7 +32,7 @@ struct VideoCard: View {
     var trailingAccessory: AnyView? = nil
     /// Instagram-only: the re-hosted cover frame + creator @handle. The card
     /// draws a native still that taps out to the reel (IG never plays inline).
-    var instaPoster: InstaPoster? = nil
+    var instaPoster: MediaRef? = nil
     var instaHandle: String? = nil
     /// The edition's VM — signs the poster's storage path for display; nil in previews.
     var issue: IssueViewModel? = nil
@@ -106,23 +106,25 @@ struct VideoCard: View {
 
             overlay()
         }
-        .modifier(ShapeFrame(shape: cardShape, contentAspect: contentAspect))
+        .modifier(ShapeFrame(contentAspect: contentAspect))
         .clipped()
     }
 
-    // A tall 9:16 reel is cropped to `instaReelAspect` so the card can hug it;
-    // everything else (YouTube, immersive) fills the card and the player
-    // letterboxes the video within its black stage.
+    // Each medium is shown at the shape it was shot in: a YouTube video is 16:9
+    // and a tall reel crops to `instaReelAspect`. The card then sizes to that
+    // rather than stretching the media to fill a viewport-tall page — filling
+    // would crop through burned-in captions and the player's own chrome.
     private var contentAspect: CGFloat? {
-        if case .insta = source, cardShape == .tall { return instaReelAspect }
-        return nil
+        switch source {
+        case .youtube: 16.0 / 9.0
+        case .insta:   cardShape == .tall ? instaReelAspect : nil
+        case .rawFile: nil
+        }
     }
 
-    // Fills the card by default (the web player letterboxes within its black
-    // stage). When `contentAspect` is set, the media sizes to that ratio so the
-    // card can hug it instead of stretching to full height.
+    // Sizes the media to `contentAspect` so the card can hug it. Nil ⇒ fill the
+    // card (a wide/square reel, or raw file playback).
     private struct ShapeFrame: ViewModifier {
-        let shape: CardShape
         var contentAspect: CGFloat? = nil
         func body(content: Content) -> some View {
             if let contentAspect {
@@ -175,7 +177,7 @@ struct VideoCard: View {
                 HStack(spacing: 14) {
                     RoundedRectangle(cornerRadius: 2).fill(Color(hex: 0xFF0000)).frame(width: 3)
                     HStack(spacing: 9) {
-                        posterAvatar(author)
+                        Avatar(user: author)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(author.username)
                                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(Style.ink)
@@ -195,45 +197,12 @@ struct VideoCard: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 16).padding(.top, 18)
             }
-            actionButtons.padding(16)
         }
+        // The actions used to sit here, which is why only YouTube cards had any.
+        // They're in CardFooter now, rendered once for every card type.
+        .padding(.bottom, 18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Style.paper)
-    }
-
-    // Comment (opens the sheet) · React · Re-circle. React/Re-circle are the
-    // design's actions; ponytail: not built yet, so they're inert for now.
-    private var actionButtons: some View {
-        HStack(spacing: 8) {
-            actionButton("Comment", systemImage: "bubble.left", filled: false) { onComment?() }
-            actionButton("React", systemImage: "camera", filled: false) {}
-            actionButton("Re-circle", systemImage: "arrow.2.squarepath", filled: true) {}
-        }
-    }
-
-    private func actionButton(_ title: String, systemImage: String, filled: Bool,
-                              action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                Image(systemName: systemImage).font(.system(size: 13, weight: .semibold))
-                Text(title).font(.system(size: 12.5, weight: .semibold))
-            }
-            .foregroundStyle(filled ? Style.paper : Style.ink)
-            .frame(maxWidth: .infinity).padding(.vertical, 9)
-            .background {
-                let shape = RoundedRectangle(cornerRadius: 12)
-                if filled { shape.fill(Style.ink) }
-                else { shape.fill(.white).overlay(shape.stroke(Style.rule, lineWidth: 1)) }
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func posterAvatar(_ author: User) -> some View {
-        SwiftUI.Circle().fill(Color(hex: 0xE3E0DB))
-            .frame(width: 30, height: 30)
-            .overlay(Text(author.username.prefix(1)).font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color(hex: 0x6B6862)))
     }
 
     // 1c — navy plate, mono kicker, cream serif title, author below.
@@ -277,10 +246,7 @@ struct VideoCard: View {
     // media / the navy plate, Style.ink on the cream plates.
     private func authorChip(_ author: User, tint: Color) -> some View {
         HStack(spacing: 9) {
-            SwiftUI.Circle().fill(tint.opacity(0.18))
-                .frame(width: 30, height: 30)
-                .overlay(SwiftUI.Circle().stroke(tint.opacity(0.45), lineWidth: 1))
-                .overlay(Text(author.username.prefix(1)).font(Style.byline).foregroundStyle(tint))
+            Avatar(user: author, ring: tint.opacity(0.45))
             VStack(alignment: .leading, spacing: 1) {
                 Text(author.username).font(Style.byline).foregroundStyle(tint)
                 if let caption {
@@ -330,7 +296,7 @@ struct VideoCard: View {
 private struct InstaLinkCard: View {
     let id: String
     let kind: InstagramContentType
-    var poster: InstaPoster?
+    var poster: MediaRef?
     var handle: String?
     var issue: IssueViewModel?
     var focus: Double = 0.5
@@ -422,7 +388,7 @@ private struct InstaLinkCard: View {
     private func resolvePoster() async {
         switch poster {
         case .direct(let url):    posterURL = url
-        case .stored(let path):   posterURL = await issue?.posterURL(path: path)
+        case .stored(let path):   posterURL = await issue?.signedURL(path: path)
         case nil:                 posterURL = nil
         }
     }

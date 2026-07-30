@@ -17,6 +17,9 @@ struct CardViewModelTests {
     // MARK: Fixtures
 
     private let youtubeURL = "https://www.youtube.com/watch?v=abc123XYZ00"
+    /// Photos are stored under their circle's folder, so a test path looks like
+    /// the real thing rather than like a URL.
+    private let circleFolder = "0C1E1E7A-0000-0000-0000-00000000C1AB"
     private let instaReelURL = "https://www.instagram.com/reel/CkLm123/"
 
     private static func user(_ name: String) -> User {
@@ -51,6 +54,7 @@ struct CardViewModelTests {
         switch media {
         case .image:    "image"
         case .video:    "video"
+        case .link:     "link"
         case .fallback: "fallback"
         }
     }
@@ -102,36 +106,35 @@ struct CardViewModelTests {
         #expect(card(page(), []).media.isEmpty)
     }
 
+    /// The stored path behind an `.image`, or nil if it wasn't one.
+    private func storedPath(_ media: CardMediaViewModel) -> String? {
+        if case .image(.stored(let path)) = media { return path }
+        return nil
+    }
+
     @Test func mediaIsSortedByPosition() {
         let vm = card(page(), [
-            media(type: "image", url: "https://example.com/c.jpg", position: 2),
-            media(type: "image", url: "https://example.com/a.jpg", position: 0),
-            media(type: "image", url: "https://example.com/b.jpg", position: 1),
+            media(type: "image", url: "\(circleFolder)/c.jpg", position: 2),
+            media(type: "image", url: "\(circleFolder)/a.jpg", position: 0),
+            media(type: "image", url: "\(circleFolder)/b.jpg", position: 1),
         ])
-        let urls = vm.media.map { media -> String in
-            if case .image(let url) = media { return url.lastPathComponent }
-            return "?"
-        }
-        #expect(urls == ["a.jpg", "b.jpg", "c.jpg"])
+        let names = vm.media.map { storedPath($0).map { ($0 as NSString).lastPathComponent } ?? "?" }
+        #expect(names == ["a.jpg", "b.jpg", "c.jpg"])
     }
 
     /// A null position sorts as 0, so legacy rows land first rather than crashing
     /// the sort or dropping out.
     @Test func nullPositionSortsAsZero() {
         let vm = card(page(), [
-            media(type: "image", url: "https://example.com/second.jpg", position: 1),
-            media(type: "image", url: "https://example.com/first.jpg", position: nil),
+            media(type: "image", url: "\(circleFolder)/second.jpg", position: 1),
+            media(type: "image", url: "\(circleFolder)/first.jpg", position: nil),
         ])
-        if case .image(let url) = vm.media.first {
-            #expect(url.lastPathComponent == "first.jpg")
-        } else {
-            #expect(Bool(false), "expected the null-position row first")
-        }
+        #expect(storedPath(vm.media[0]) == "\(circleFolder)/first.jpg")
     }
 
     @Test func everyMediaRowBecomesExactlyOneRenderableItem() {
         let vm = card(page(), [
-            media(type: "image", url: "https://example.com/a.jpg", position: 0),
+            media(type: "image", url: "\(circleFolder)/a.jpg", position: 0),
             media(type: "video", url: youtubeURL, position: 1),
             media(type: "text", url: nil, position: 2),
         ])
@@ -141,13 +144,18 @@ struct CardViewModelTests {
 
     // MARK: - Media mapping: images
 
-    @Test func anImageRowBecomesAnImage() {
-        let vm = card(page(), [media(type: "image", url: "https://example.com/a.jpg", position: 0)])
-        if case .image(let url) = vm.media[0] {
-            #expect(url.absoluteString == "https://example.com/a.jpg")
-        } else {
-            #expect(Bool(false), "expected .image, got \(label(vm.media[0]))")
-        }
+    /// A photo's `media_url` is a storage path, not a URL — it must survive
+    /// intact for signing, not get run through URL parsing.
+    @Test func anImageRowKeepsItsStoragePath() {
+        let vm = card(page(), [media(type: "image", url: "\(circleFolder)/a.jpg", position: 0)])
+        #expect(storedPath(vm.media[0]) == "\(circleFolder)/a.jpg")
+    }
+
+    /// An image row with no path can't be signed, so it falls back rather than
+    /// rendering a card pointing at nothing.
+    @Test func anImageRowWithNoPathFallsBack() {
+        let vm = card(page(), [media(type: "image", url: nil, position: 0)])
+        #expect(label(vm.media[0]) == "fallback")
     }
 
     // MARK: - Media mapping: video
@@ -256,31 +264,50 @@ struct CardViewModelTests {
         #expect(error == nil)
     }
 
-    // MARK: - isTallInsta
+    // MARK: - hugsItsMedia
+    //
+    // Which cards the feed sizes to their media and centres, instead of
+    // stretching to fill the page. Video has a shape of its own and filling can
+    // only crop it; a photo has no shape until it loads, so it fills.
 
     /// The feed sizes these to their cropped poster instead of the full viewport.
-    @Test func aTallInstaCardIsFlagged() {
+    @Test func aTallInstaCardHugsItsMedia() {
         let vm = card(page(cardShape: .tall),
                       [media(type: "video", url: instaReelURL, position: 0)])
-        #expect(vm.isTallInsta)
+        #expect(vm.hugsItsMedia)
     }
 
-    @Test func aTallYouTubeShortIsNotAnInstaCard() {
-        let vm = card(page(cardShape: .tall),
-                      [media(type: "video", url: "https://www.youtube.com/shorts/sh0rt1d",
-                             position: 0)])
-        #expect(!vm.isTallInsta)
+    /// A YouTube embed is 16:9 whatever shape the author picked — filling a
+    /// portrait card would crop through burned-in captions and the player's
+    /// own chrome, so every YouTube card hugs regardless of `cardShape`.
+    @Test func aYouTubeCardHugsItsMediaAtEveryShape() {
+        for shape in CardShape.allCases {
+            let vm = card(page(cardShape: shape),
+                          [media(type: "video", url: "https://www.youtube.com/shorts/sh0rt1d",
+                                 position: 0)])
+            #expect(vm.hugsItsMedia)
+        }
     }
 
-    @Test func aSquareInstaPostIsNotFlagged() {
+    /// Instagram is the exception: only the tall reel crop hugs. A square post
+    /// has no tall poster to hug, so it fills like anything else.
+    @Test func aSquareInstaPostDoesNotHug() {
         let vm = card(page(cardShape: .square),
                       [media(type: "video", url: "https://www.instagram.com/p/CkLm123/",
                              position: 0)])
-        #expect(!vm.isTallInsta)
+        #expect(!vm.hugsItsMedia)
     }
 
-    @Test func aCardWithNoMediaIsNotFlagged() {
-        #expect(!card(page(cardShape: .tall), []).isTallInsta)
+    /// A photo's aspect isn't known until it loads, so a photo card fills the
+    /// page and crops rather than resizing under the reader.
+    @Test func aPhotoCardDoesNotHug() {
+        let vm = card(page(cardShape: .tall),
+                      [media(type: "image", url: "https://example.com/a.jpg", position: 0)])
+        #expect(!vm.hugsItsMedia)
+    }
+
+    @Test func aCardWithNoMediaDoesNotHug() {
+        #expect(!card(page(cardShape: .tall), []).hugsItsMedia)
     }
 
     /// Only the FIRST media item decides — a tall card whose lead item is an
@@ -290,7 +317,84 @@ struct CardViewModelTests {
             media(type: "image", url: "https://example.com/a.jpg", position: 0),
             media(type: "video", url: instaReelURL, position: 1),
         ])
-        #expect(!vm.isTallInsta)
+        #expect(!vm.hugsItsMedia)
+    }
+
+    // MARK: - Feed grouping
+    //
+    // An edition reads as sections: every YouTube card, then every reel, then
+    // the rest. Cards in a group are the same height as each other, so the feed
+    // stops changing format every swipe.
+
+    /// One page per medium, deliberately interleaved in the issue, so a feed
+    /// that just echoed page order would fail this.
+    private func mixedMagazine() -> Magazine {
+        func p(_ type: String, _ url: String, _ title: String) -> MagazinePage {
+            MagazinePage(page: page(title: title),
+                         pageMedia: [media(type: type, url: url, position: 0)],
+                         author: author)
+        }
+        return Magazine(
+            issue: Issue(id: UUID(), circleId: UUID(), publishDate: "2026-08-01",
+                         isLive: nil, createdAt: nil),
+            pages: [
+                p("image", "\(circleFolder)/one.jpg", "photo A"),
+                p("video", instaReelURL, "reel A"),
+                p("video", youtubeURL, "tube A"),
+                p("image", "\(circleFolder)/two.jpg", "photo B"),
+                p("video", "https://www.youtube.com/watch?v=zzz999AAA11", "tube B"),
+                p("video", "https://www.instagram.com/reel/Wxyz789/", "reel B"),
+            ])
+    }
+
+    @Test func theFeedGroupsCardsByMedium() {
+        #expect(mixedMagazine().cards().map(\.medium) ==
+                [.youtube, .youtube, .instagram, .instagram, .other, .other])
+    }
+
+    /// Grouping must not reshuffle within a group — the issue's own page order
+    /// still decides which YouTube card comes first.
+    @Test func groupingKeepsPageOrderInsideEachGroup() {
+        #expect(mixedMagazine().cards().map(\.title) ==
+                ["tube A", "tube B", "reel A", "reel B", "photo A", "photo B"])
+    }
+
+    @Test func groupingLosesNoPages() {
+        let magazine = mixedMagazine()
+        #expect(magazine.cards().count == magazine.pages.count)
+    }
+
+    // MARK: - Blank pages
+
+    /// A page with nothing to draw is a blank sheet of paper in the feed — old
+    /// pages with no media rows look like this, and so does one whose media a
+    /// policy withheld.
+    @Test func theFeedDropsPagesWithNothingToRender() {
+        let magazine = Magazine(
+            issue: Issue(id: UUID(), circleId: UUID(), publishDate: "2026-08-01",
+                         isLive: nil, createdAt: nil),
+            pages: [
+                MagazinePage(page: page(title: "real"),
+                             pageMedia: [media(type: "image", url: "\(circleFolder)/a.jpg", position: 0)],
+                             author: author),
+                MagazinePage(page: page(title: "no media rows at all"),
+                             pageMedia: [], author: author),
+                // "audio" is a parked kind — it lands on `.fallback`, which draws
+                // nothing, same as a row the reader isn't allowed to see.
+                MagazinePage(page: page(title: "nothing we can draw"),
+                             pageMedia: [media(type: "audio", url: "https://example.com/a.m4a",
+                                               position: 0)],
+                             author: author),
+            ])
+        #expect(magazine.cards().map(\.title) == ["real"])
+    }
+
+    @Test func aPageWithOnlyAFallbackRowHasNothingToRender() {
+        #expect(!card(page(), [media(type: "audio", url: "https://example.com/a.m4a", position: 0)])
+            .hasRenderableMedia)
+        #expect(!card(page(), []).hasRenderableMedia)
+        #expect(card(page(), [media(type: "video", url: youtubeURL, position: 0)])
+            .hasRenderableMedia)
     }
 
     // MARK: - Compose preview initialiser
@@ -306,7 +410,7 @@ struct CardViewModelTests {
         #expect(vm.caption == "C")
         #expect(vm.captionStyle == .inkBand)
         #expect(vm.cardShape == .tall)
-        #expect(vm.isTallInsta)
+        #expect(vm.hugsItsMedia)
 
         guard case .video(let source, let poster, let handle, let focus) = vm.media[0] else {
             #expect(Bool(false), "a preview card always has exactly one video item")
@@ -331,7 +435,7 @@ struct CardViewModelTests {
         #expect(poster == nil)
         #expect(handle == nil)
         #expect(focus == 0.5)
-        #expect(!vm.isTallInsta)   // wide, so never reel-sized
+        #expect(vm.hugsItsMedia)   // YouTube is 16:9 even on a wide card
     }
 
     @Test func previewCardsGetDistinctIds() {
@@ -346,8 +450,8 @@ struct CardViewModelTests {
 
     @Test func aMagazineMapsEveryPageToOneCardInOrder() {
         let magazine = Magazine.sample
-        #expect(magazine.cards.count == magazine.pages.count)
-        #expect(magazine.cards.map(\.id) == magazine.pages.map(\.page.id))
+        #expect(magazine.cards().count == magazine.pages.count)
+        #expect(magazine.cards().map(\.id) == magazine.pages.map(\.page.id))
     }
 
     @Test func contributorsAreDistinctAuthorsInFirstAppearanceOrder() {

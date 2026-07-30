@@ -52,6 +52,34 @@ struct CommentWithAuthor: Identifiable {
     var id: UUID { comment.id }
 }
 
+/// A photo someone took in response to a page. One per person per page — the DB
+/// enforces it with UNIQUE(page_id, user_id), so reacting again replaces rather
+/// than accumulates. `mediaPath` is a path in the private bucket, never a URL:
+/// the feed signs it at render time, same as every other stored image.
+nonisolated struct Reaction: Codable, Identifiable {
+    let id: UUID
+    let pageId: UUID
+    let userId: UUID
+    let mediaPath: String
+    let createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case pageId = "page_id"
+        case userId = "user_id"
+        case mediaPath = "media_path"
+        case createdAt = "created_at"
+    }
+}
+
+/// A reaction paired with its author, so a card can show whose face it is.
+/// Author nil when that user row didn't come back — someone who left the circle.
+struct ReactionWithAuthor: Identifiable {
+    let reaction: Reaction
+    let author: User?
+    var id: UUID { reaction.id }
+}
+
 struct Engagement: Codable {
     let id: UUID
     let userId: UUID?
@@ -90,6 +118,8 @@ struct Issue: Codable {
     let id: UUID
     let circleId: UUID
     let publishDate: String
+    /// Vestigial — liveness is derived from `publishDate` (see `liveCutoff`).
+    /// Nothing reads this; the column is left in place so old rows still decode.
     let isLive: Bool?
     let createdAt: Date?
 
@@ -113,6 +143,19 @@ extension Issue {
     /// A day in `publish_date`'s wire format ("2026-06-17"). Same formatter as
     /// the parser, so writing and reading can't drift apart.
     static func publishDate(for date: Date) -> String { dateParser.string(from: date) }
+
+    /// Liveness is **derived, not stored**: an edition is live once the Saturday
+    /// it closes on is strictly in the past — i.e. from Sunday onward. An edition
+    /// stamped with today is still being assembled, which is why the live filter
+    /// is `<` and the draft filter is `>=`.
+    ///
+    /// Nothing writes `is_live`; there is no publish job to run late or not at
+    /// all, and no window where a circle is stuck mid-week.
+    /// ponytail: the cutoff is the *device's* local day, so a circle spanning
+    /// timezones publishes at each member's own midnight rather than one shared
+    /// instant. Fine for a friend group; move to a server-side RPC if a circle
+    /// ever spreads far enough that the skew is felt.
+    static func liveCutoff(now: Date = .now) -> String { publishDate(for: now) }
 
     private static let dateParser: DateFormatter = {
         let f = DateFormatter()
@@ -149,6 +192,21 @@ enum EditionCountdown {
                       to: deadline(after: now, calendar: calendar))!
     }
 
+    /// "August 1" — the edition currently being assembled, named by the Saturday
+    /// it closes on. Same day the masthead shows, so compose and the edition
+    /// itself can't call the same issue by two different names.
+    static func editionName(after now: Date = .now, calendar: Calendar = .current) -> String {
+        monthDay.string(from: publishDay(after: now, calendar: calendar))
+    }
+
+    /// "Sunday, August 2" — when that edition opens for reading. A week's work
+    /// closes Saturday midnight and is readable from Sunday, so this is always
+    /// the day AFTER the edition's name. Saying both is the point: authors kept
+    /// looking for their submission on the day the edition is named for.
+    static func opensOn(after now: Date = .now, calendar: Calendar = .current) -> String {
+        weekdayMonthDay.string(from: deadline(after: now, calendar: calendar))
+    }
+
     /// "2d 05h 41m", or "05h 41m 12s" inside the final day.
     static func string(from now: Date, calendar: Calendar = .current) -> String {
         var s = Int(deadline(after: now, calendar: calendar).timeIntervalSince(now).rounded())
@@ -158,6 +216,19 @@ enum EditionCountdown {
         func pad(_ n: Int) -> String { String(format: "%02d", n) }
         return d > 0 ? "\(d)d \(pad(h))h \(pad(m))m" : "\(pad(h))h \(pad(m))m \(pad(s))s"
     }
+
+    private static let monthDay: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US")
+        f.dateFormat = "MMMM d"
+        return f
+    }()
+    private static let weekdayMonthDay: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US")
+        f.dateFormat = "EEEE, MMMM d"
+        return f
+    }()
 }
 
 struct PageMedia: Codable, Identifiable {
@@ -227,5 +298,23 @@ struct User: Codable {
         case circleSlots = "circle_slots"
         case isVerified = "is_verified"
         case createdAt = "created_at"
+    }
+}
+
+extension User {
+    /// The monogram an avatar falls back to. Two letters from a two-word name,
+    /// otherwise the first two characters — "Dave Slater" → DS, "jmoney" → JM.
+    /// Lives here because three screens were each keeping their own copy.
+    var initials: String {
+        let words = username.split(separator: " ")
+        if words.count >= 2 {
+            return String(words[0].prefix(1) + words[1].prefix(1)).uppercased()
+        }
+        return String(username.prefix(2)).uppercased()
+    }
+
+    /// First name only, for the places that address someone rather than label them.
+    var firstName: String {
+        String(username.split(separator: " ").first ?? Substring(username))
     }
 }

@@ -78,6 +78,7 @@ private func stubOEmbed(status: Int = 200, title: String = "Stub Title",
 private final class SpyDatabase: DatabaseService, @unchecked Sendable {
     struct PostCall {
         let issueId: UUID
+        let circleId: UUID
         let authorId: UUID
         let videoURL: URL
         let caption: String?
@@ -85,9 +86,20 @@ private final class SpyDatabase: DatabaseService, @unchecked Sendable {
         let cardShape: CardShape
     }
 
+    /// A photo submission — the bytes and the framing that went to storage.
+    struct PhotoCall {
+        let issueId: UUID
+        let circleId: UUID
+        let authorId: UUID
+        let jpeg: Data
+        let caption: String?
+        let cardShape: CardShape
+    }
+
     struct NoEdition: Error {}
 
     var postCalls: [PostCall] = []
+    var photoCalls: [PhotoCall] = []
     var errorToThrow: Error?
     /// The edition post()'s self-serve lookup lands on when the model has no
     /// issueId. nil ⇒ the lookup throws, as it does when RLS blocks opening a draft.
@@ -100,13 +112,25 @@ private final class SpyDatabase: DatabaseService, @unchecked Sendable {
         return stubbedSubmissionIssueId
     }
 
-    override func createVideoPost(issueId: UUID, authorId: UUID, videoURL: URL, caption: String?,
-                                  captionStyle: CaptionStyle, cardShape: CardShape,
+    override func createVideoPost(issueId: UUID, circleId: UUID, authorId: UUID, videoURL: URL,
+                                  caption: String?, captionStyle: CaptionStyle, cardShape: CardShape,
                                   insta: InstagramEmbed.Meta? = nil, posterFocus: Double? = nil) async throws -> Page {
         await onPost?()
         if let errorToThrow { throw errorToThrow }
-        postCalls.append(PostCall(issueId: issueId, authorId: authorId, videoURL: videoURL,
-                                  caption: caption, captionStyle: captionStyle, cardShape: cardShape))
+        postCalls.append(PostCall(issueId: issueId, circleId: circleId, authorId: authorId,
+                                  videoURL: videoURL, caption: caption,
+                                  captionStyle: captionStyle, cardShape: cardShape))
+        return Page(id: UUID(), issueId: issueId, submittedBy: authorId,
+                    title: nil, caption: caption, captionStyle: captionStyle, createdAt: nil)
+    }
+
+    override func createPhotoPost(issueId: UUID, circleId: UUID, authorId: UUID, jpeg: Data,
+                                  caption: String?, captionStyle: CaptionStyle,
+                                  cardShape: CardShape) async throws -> Page {
+        await onPost?()
+        if let errorToThrow { throw errorToThrow }
+        photoCalls.append(PhotoCall(issueId: issueId, circleId: circleId, authorId: authorId,
+                                    jpeg: jpeg, caption: caption, cardShape: cardShape))
         return Page(id: UUID(), issueId: issueId, submittedBy: authorId,
                     title: nil, caption: caption, captionStyle: captionStyle, createdAt: nil)
     }
@@ -122,7 +146,11 @@ struct ComposeModelTests {
     private let circleId = UUID()
 
     private let watchLink = "https://www.youtube.com/watch?v=abc123XYZ00"
-    private let parseError = "Paste a YouTube or Instagram link."
+    /// Shown when the text isn't a URL at all. Any *link* is postable now, so
+    /// this is only reached by things that don't parse as one.
+    private let parseError = "That doesn't look like a link."
+    /// A link that parses but that we won't fetch over cleartext.
+    private let schemeError = "Links need to start with https."
 
     init() {
         let config = URLSessionConfiguration.ephemeral
@@ -134,8 +162,18 @@ struct ComposeModelTests {
         StubURLProtocol.requested = false
     }
 
-    private func makeModel(issueId: UUID?? = nil) -> ComposeModel {
-        ComposeModel(db: spy, issueId: issueId ?? self.issueId, circleId: circleId, author: author)
+    /// The model no longer takes an edition — `post()` always asks the DB which
+    /// one a submission belongs in, so the spy's answer IS the target.
+    private func makeModel() -> ComposeModel {
+        spy.stubbedSubmissionIssueId = issueId
+        return ComposeModel(db: spy, circleId: circleId, author: author)
+    }
+
+    /// A model whose circle has no edition available and can't open one — the
+    /// case where `issueIdForSubmission` throws.
+    private func makeModelWithNoEdition() -> ComposeModel {
+        spy.stubbedSubmissionIssueId = nil
+        return ComposeModel(db: spy, circleId: circleId, author: author)
     }
 
     /// startResolving and wait for that resolve pass to finish.
@@ -162,20 +200,61 @@ struct ComposeModelTests {
         #expect(model.resolved == nil)
     }
 
+    /// Bare prose parses as a relative URL with no scheme, so it lands on the
+    /// https guard rather than the parse one. Either way: not staged.
     @Test func plainTextShowsError() async {
         let model = makeModel()
         model.linkText = "check out this video"
         await resolveAndWait(model)
-        #expect(model.errorText == parseError)
-        #expect(model.resolved == nil)
+        #expect(model.errorText == schemeError)
+        #expect(model.draft == nil)
     }
 
-    @Test func rawFileLinkIsRejected() async {
+    /// The reader's device fetches whatever was pasted, so cleartext is refused
+    /// before any request goes out.
+    @Test func anHttpLinkIsRefused() async {
+        let model = makeModel()
+        model.linkText = "http://example.com/article"
+        await resolveAndWait(model)
+        #expect(model.errorText == schemeError)
+        #expect(model.draft == nil)
+    }
+
+    // MARK: resolve — plain links
+    //
+    // Anything that isn't a YouTube or Instagram embed is a web link. It stages
+    // whether or not the site published metadata, because a site's failure to
+    // fill in its meta tags isn't a reason a member can't share it.
+
+    @Test func aPlainLinkStagesAsAWebLink() async {
+        stubOEmbed()   // not HTML, so the scrape finds nothing — the point here
+        let model = makeModel()
+        model.linkText = "https://example.com/article"
+        await resolveAndWait(model)
+        #expect(model.errorText == nil)
+        #expect(model.webLink?.url.absoluteString == "https://example.com/article")
+        #expect(model.canPost)
+        #expect(!model.isResolving)
+    }
+
+    /// A link with no readable metadata is a normal post, not an error.
+    @Test func aLinkWithoutMetadataStillStages() async {
+        stubOEmbed()
+        let model = makeModel()
+        model.linkText = "https://example.com/article"
+        await resolveAndWait(model)
+        #expect(model.webLink?.meta == nil)
+        #expect(model.canPost)
+    }
+
+    @Test func aPlainLinkIsNotAVideoDraft() async {
+        stubOEmbed()
         let model = makeModel()
         model.linkText = "https://example.com/clip.mp4"
         await resolveAndWait(model)
-        #expect(model.errorText == parseError)
-        #expect(model.resolved == nil)
+        #expect(model.resolved == nil)      // not a player
+        #expect(model.photo == nil)
+        #expect(model.webLink != nil)
     }
 
     // MARK: resolve — YouTube happy paths
@@ -365,7 +444,7 @@ struct ComposeModelTests {
 
     @Test func canPostRequiresResolvedLink() async {
         stubOEmbed()
-        let model = makeModel(issueId: .some(nil))
+        let model = makeModel()
         #expect(!model.canPost)   // nothing resolved yet
         model.linkText = watchLink
         await resolveAndWait(model)
@@ -391,8 +470,7 @@ struct ComposeModelTests {
 
     @Test func postWithoutAnyIssueAnywhereSetsError() async {
         stubOEmbed()
-        let model = makeModel(issueId: .some(nil))   // feed had nothing…
-        spy.stubbedSubmissionIssueId = nil           // …and the DB can't open one either
+        let model = makeModelWithNoEdition()   // the DB can't open an edition
         model.linkText = watchLink
         await resolveAndWait(model)
         await model.post()
@@ -401,13 +479,13 @@ struct ComposeModelTests {
         #expect(spy.postCalls.isEmpty)
     }
 
-    /// Regression: a failed feed load used to grey out Post forever — the model
-    /// now asks the DB which edition to post into itself. That lookup also covers
-    /// the compose phase, where nothing is live and a draft gets opened.
-    @Test func postSelfFetchesIssueIdWhenFeedCouldNot() async {
+    /// The model never names the edition itself — it asks the DB, which answers
+    /// with the circle's open draft (opening one if this is the week's first
+    /// submission). The screen's loaded edition never enters into it.
+    @Test func postWritesIntoTheEditionTheDBNames() async {
         stubOEmbed()
         let fetched = UUID()
-        let model = makeModel(issueId: .some(nil))
+        let model = makeModel()
         spy.stubbedSubmissionIssueId = fetched
         model.linkText = watchLink
         await resolveAndWait(model)
@@ -503,19 +581,23 @@ struct ComposeModelTests {
 
     /// The self-serve lookup runs once; a retry reuses the id it landed on
     /// rather than opening a second draft.
-    @Test func postDoesNotRepeatTheEditionLookupOnRetry() async {
+    /// The lookup is deliberately NOT cached across posts. The open draft rolls
+    /// over at the week boundary, so a compose sheet left open across it must
+    /// pick up the new edition rather than writing into the one that just
+    /// published. Each post asks again and uses the current answer.
+    @Test func postRepeatsTheEditionLookupOnRetry() async {
         stubOEmbed()
-        let found = UUID()
-        let model = makeModel(issueId: .some(nil))
-        spy.stubbedSubmissionIssueId = found
+        let firstAnswer = UUID(), rolledOver = UUID()
+        let model = makeModel()
+        spy.stubbedSubmissionIssueId = firstAnswer
         model.linkText = watchLink
         await resolveAndWait(model)
         spy.errorToThrow = NSError(domain: "test", code: 1)
-        await model.post()                     // lookup happens, write fails
+        await model.post()                          // lookup happens, write fails
         spy.errorToThrow = nil
-        spy.stubbedSubmissionIssueId = UUID()  // a different answer, if asked again
+        spy.stubbedSubmissionIssueId = rolledOver   // the week turned over
         await model.post()
-        #expect(spy.postCalls.first?.issueId == found)
+        #expect(spy.postCalls.first?.issueId == rolledOver)
     }
 
     /// A whitespace-only caption is still "no note" as far as the DB is
@@ -611,6 +693,116 @@ struct ComposeModelTests {
         model.cancelResolving()
         #expect(model.resolved != nil)
         #expect(model.canPost)
+    }
+
+    // MARK: Photos
+    //
+    // A photo is the other half of `draft`, so these pin the parts a link can't
+    // reach: that the bytes and the circle survive to the write, and that the
+    // two kinds of draft genuinely replace each other rather than stacking.
+
+    private let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10])   // JPEG magic, enough to be distinct
+    private var previewURL: URL { URL(string: "file:///tmp/compose-preview.jpg")! }
+
+    @Test func stagingAPhotoMakesItPostable() {
+        let model = makeModel()
+        #expect(!model.canPost)
+        model.stagePhoto(jpeg: jpeg, previewURL: previewURL)
+        #expect(model.canPost)
+        #expect(model.photo?.jpeg == jpeg)
+        #expect(model.resolved == nil)   // it's a photo, not a link
+    }
+
+    /// The upload needs the circle: it's the storage folder, and the folder is
+    /// what the bucket policy checks.
+    @Test func postingAPhotoSendsTheBytesAndTheCircle() async {
+        let model = makeModel()
+        model.stagePhoto(jpeg: jpeg, previewURL: previewURL, shape: .tall)
+        model.caption = "cousin got married"
+        await model.post()
+
+        #expect(model.phase == .posted)
+        #expect(spy.postCalls.isEmpty)          // not a video post
+        #expect(spy.photoCalls.count == 1)
+        let call = spy.photoCalls[0]
+        #expect(call.jpeg == jpeg)
+        #expect(call.circleId == circleId)
+        #expect(call.issueId == issueId)
+        #expect(call.authorId == author.id)
+        #expect(call.caption == "cousin got married")
+        #expect(call.cardShape == .tall)
+    }
+
+    @Test func aPhotoWithNoCaptionSendsNilNotEmptyString() async {
+        let model = makeModel()
+        model.stagePhoto(jpeg: jpeg, previewURL: previewURL)
+        await model.post()
+        #expect(spy.photoCalls[0].caption == nil)
+    }
+
+    /// Picking a photo after pasting a link swaps the draft. Without this the
+    /// two could both be staged and post() would silently pick one.
+    @Test func stagingAPhotoReplacesAResolvedLink() async {
+        stubOEmbed()
+        let model = makeModel()
+        model.linkText = watchLink
+        await resolveAndWait(model)
+        #expect(model.resolved != nil)
+
+        model.stagePhoto(jpeg: jpeg, previewURL: previewURL)
+        #expect(model.resolved == nil)
+        #expect(model.photo != nil)
+        #expect(model.linkText.isEmpty)
+
+        await model.post()
+        #expect(spy.photoCalls.count == 1)
+        #expect(spy.postCalls.isEmpty)
+    }
+
+    /// …and the other direction: resolving a link over a staged photo leaves
+    /// only the link.
+    @Test func resolvingALinkReplacesAStagedPhoto() async {
+        stubOEmbed()
+        let model = makeModel()
+        model.stagePhoto(jpeg: jpeg, previewURL: previewURL)
+        model.linkText = watchLink
+        await resolveAndWait(model)
+
+        #expect(model.photo == nil)
+        #expect(model.resolved != nil)
+
+        await model.post()
+        #expect(spy.postCalls.count == 1)
+        #expect(spy.photoCalls.isEmpty)
+    }
+
+    @Test func photoShapeIsChangeableBeforePosting() async {
+        let model = makeModel()
+        model.stagePhoto(jpeg: jpeg, previewURL: previewURL, shape: .tall)
+        model.setPhotoShape(.wide)
+        #expect(model.photo?.shape == .wide)
+        await model.post()
+        #expect(spy.photoCalls[0].cardShape == .wide)
+    }
+
+    /// Changing the shape with nothing staged must not conjure a draft — Post
+    /// would light up with nothing behind it.
+    @Test func settingAShapeWithNothingStagedIsANoOp() {
+        let model = makeModel()
+        model.setPhotoShape(.wide)
+        #expect(model.draft == nil)
+        #expect(!model.canPost)
+    }
+
+    @Test func aFailedPhotoUploadRestoresEditing() async {
+        struct Boom: Error, LocalizedError { var errorDescription: String? { "storage is down" } }
+        let model = makeModel()
+        spy.errorToThrow = Boom()
+        model.stagePhoto(jpeg: jpeg, previewURL: previewURL)
+        await model.post()
+        #expect(model.phase == .editing)
+        #expect(model.errorText == "Couldn't post — storage is down")
+        #expect(model.canPost)   // still staged, so they can retry
     }
 
     // MARK: Defaults

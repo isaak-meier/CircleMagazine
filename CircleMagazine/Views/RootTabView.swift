@@ -43,23 +43,25 @@ struct RootTabView: View {
     enum Tab { case circles, account }
 
     var body: some View {
-        ZStack {
-            if let entered, let circleVM {
-                CircleMagazineView(vm: circleVM, tone: entered.tone) {
-                    self.entered = nil
-                    self.circleVM = nil
-                    chatRevealed = false
+        // The nav bar sits outside the ripple, so entering a circle swaps only
+        // the screen above it — you never lose your way back to Account.
+        VStack(spacing: 0) {
+            ZStack {
+                if let entered, let circleVM {
+                    CircleMagazineView(vm: circleVM, tone: entered.tone, onBack: exitCircle)
                 }
+                // Kept in the hierarchy (hidden, not removed) so tab state like
+                // the Circles bubble physics survives a trip into a magazine.
+                tabs
+                    .opacity(chatRevealed ? 0 : 1)
+                    .allowsHitTesting(!chatRevealed)
+                    // wave: false — the magazine's webviews beneath can't take
+                    // the Metal shader (they'd render as red boxes); hole-mask only.
+                    .rippleReveal(origin: entered?.origin, wave: false) { chatRevealed = true }
             }
-            // Kept in the hierarchy (hidden, not removed) so tab state like the
-            // Circles bubble physics survives a trip into a magazine.
-            tabsAndNavBar
-                .opacity(chatRevealed ? 0 : 1)
-                .allowsHitTesting(!chatRevealed)
-                // wave: false — the magazine's webviews beneath can't take the
-                // Metal shader (they'd render as red boxes); hole-mask only.
-                .rippleReveal(origin: entered?.origin, wave: false) { chatRevealed = true }
+            navBar
         }
+        .background(Style.chrome)
         .coordinateSpace(name: "root")
         // ponytail: URLs are dropped if this view isn't up yet (app cold-starts
         // signed out) — stash the code at App level if that ever matters.
@@ -68,39 +70,46 @@ struct RootTabView: View {
                   let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                       .queryItems?.first(where: { $0.name == "code" })?.value
             else { return }
-            entered = nil
-            circleVM = nil
-            chatRevealed = false
+            exitCircle()
             tab = .circles
             pendingJoinCode = code
         }
     }
 
-    private var tabsAndNavBar: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                CirclesView(vm: circlesVM,
-                            active: tab == .circles && entered == nil,
-                            joinCode: $pendingJoinCode) { summary, tone, origin in
-                    guard case .signedIn(let user) = account.authState else { return }
-                    entered = EnteredCircle(tone: tone, origin: origin)
-                    circleVM = factory.makeCircleVM(summary, me: user)
-                }
-                    .opacity(tab == .circles ? 1 : 0).allowsHitTesting(tab == .circles)
-                AccountView(account: account)
-                    .opacity(tab == .account ? 1 : 0).allowsHitTesting(tab == .account)
+    /// A tab tap from inside a circle backs out of it first — the bar is now
+    /// always reachable, so it has to mean "leave here and go there".
+    private func select(_ destination: Tab) {
+        exitCircle()
+        tab = destination
+    }
+
+    private func exitCircle() {
+        entered = nil
+        circleVM = nil
+        chatRevealed = false
+    }
+
+    private var tabs: some View {
+        ZStack {
+            CirclesView(vm: circlesVM,
+                        active: tab == .circles && entered == nil,
+                        joinCode: $pendingJoinCode) { summary, tone, origin in
+                guard case .signedIn(let user) = account.authState else { return }
+                entered = EnteredCircle(tone: tone, origin: origin)
+                circleVM = factory.makeCircleVM(summary, me: user)
             }
-            navBar
+                .opacity(tab == .circles ? 1 : 0).allowsHitTesting(tab == .circles)
+            AccountView(account: account, onEditionSourceChanged: factory.reset)
+                .opacity(tab == .account ? 1 : 0).allowsHitTesting(tab == .account)
         }
-        .background(Style.chrome)
     }
 
     // MARK: Nav bar
 
     private var navBar: some View {
         HStack {
-            Button { tab = .circles } label: { navIcon("circle.circle", active: tab == .circles) }
-            Button { tab = .account } label: { navIcon("person", active: tab == .account) }
+            Button { select(.circles) } label: { navIcon("circle.circle", active: tab == .circles) }
+            Button { select(.account) } label: { navIcon("person", active: tab == .account) }
         }
         .padding(.horizontal, Style.Space.xl)
         .padding(.top, Style.Space.sm)

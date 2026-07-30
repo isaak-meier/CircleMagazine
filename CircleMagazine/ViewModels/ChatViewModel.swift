@@ -35,6 +35,10 @@ final class ChatViewModel {
     /// add one + Supabase Realtime when chat needs to persist.
     private var messages: [ChatMessage]
 
+    /// This week's submissions, as event rows. Kept apart from `messages`
+    /// because they're server truth that gets refetched, not local chatter.
+    private var submissions: [ChatMessage] = []
+
     var draft = ""
 
     init(db: DatabaseService, summary: CircleSummary, me: User, seed: [ChatMessage] = []) {
@@ -79,17 +83,48 @@ final class ChatViewModel {
 
     // MARK: Thread
 
+    /// Chatter and submissions interleaved in time — a submission reads as
+    /// something that happened in the conversation, which is what it is.
+    private var thread: [ChatMessage] {
+        (messages + submissions).sorted { $0.sentAt < $1.sentAt }
+    }
+
     var rows: [Row] {
-        messages.indices.map { i in
-            let m = messages[i]
-            let run = ChatRun.flags(at: i, in: messages)
+        let thread = self.thread
+        return thread.indices.map { i in
+            let m = thread[i]
+            let run = ChatRun.flags(at: i, in: thread)
             return Row(
                 id: m.id, isEvent: m.isEvent, isMine: m.author.id == me.id,
-                text: m.text, authorName: Self.firstName(m.author.username),
+                text: m.isEvent ? Self.submissionText : m.text,
+                authorName: Self.firstName(m.author.username),
                 initials: Self.initials(m.author.username),
                 avatarIndex: avatarIndex(of: m.author),
                 isRunStart: run.first, isRunEnd: run.last,
                 time: m.sentAt.formatted(date: .omitted, time: .shortened))
+        }
+    }
+
+    /// Said the same way for everyone, including yourself — the phase's point is
+    /// that a submission is an event, not a reveal.
+    private static let submissionText = "submitted a piece to this week's edition"
+
+    // MARK: Loading
+
+    /// Pull this week's submissions. Called on appear and after composing, so a
+    /// piece you just added shows up in the thread straight away.
+    func appear() async {
+        guard let rows = try? await db.draftSubmissions(circleId: summary.circle.id) else {
+            return   // transient failure: keep whatever thread we already have
+        }
+        // A submitter who has since left the circle has no member row to render
+        // an avatar or name from, so their event drops out rather than showing
+        // a blank. ponytail: fetch the author by id if that ever matters.
+        let byId = Dictionary(uniqueKeysWithValues: summary.members.map { ($0.id, $0) })
+        submissions = rows.compactMap { submission in
+            byId[submission.authorId].map {
+                ChatMessage(author: $0, kind: .submission, sentAt: submission.at)
+            }
         }
     }
 

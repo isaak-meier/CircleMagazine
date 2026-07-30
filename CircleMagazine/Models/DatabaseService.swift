@@ -118,11 +118,24 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
   /// (ordered by position), or **nil during the compose phase** — nothing is
   /// live, which is a normal half of the week, not a failure.
   /// could be optimzed for multiple async server calls TODO
+  /// Debug: read the newest edition whatever its publish date, so the open draft
+  /// is what the feed shows. Liveness is derived from `publish_date`, so without
+  /// this a submission isn't readable until the Sunday it opens — which makes a
+  /// post impossible to eyeball while building. Off ⇒ ordinary behaviour.
+  static let showDraftKey = "debug.showDraftEdition"
+  static var isShowingDraft: Bool { UserDefaults.standard.bool(forKey: showDraftKey) }
+
   func fetchCurrentIssue(circleId: UUID) async throws -> Magazine? {
 
-    let issues: [Issue] = try await supabase.from("issues")
-      .select().eq("is_live", value: true).eq("circle_id", value: circleId.uuidString)
-      .order("created_at", ascending: false).limit(1).execute().value
+    var query = supabase.from("issues")
+      .select().eq("circle_id", value: circleId.uuidString)
+    // Ordering by publish_date descending already puts the draft first, so the
+    // only difference is whether we keep it.
+    if !Self.isShowingDraft {
+      query = query.lt("publish_date", value: Issue.liveCutoff())
+    }
+    let issues: [Issue] = try await query
+      .order("publish_date", ascending: false).limit(1).execute().value
     guard let issue = issues.first else { return nil }
 
     let pages: [Page] = try await supabase.from("pages")
@@ -141,14 +154,30 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
       .order("position", ascending: true).execute().value
     let byPage = Dictionary(grouping: media, by: \.pageId)
 
-    // Authors — one round trip for every page's submitter, keyed by id.
-    let authorIds = Array(Set(pages.compactMap(\.submittedBy?.uuidString)))
-    let authors: [User] = authorIds.isEmpty ? [] : try await supabase.from("users")
-      .select().in("id", values: authorIds).execute().value
-    let byId = Dictionary(uniqueKeysWithValues: authors.map { ($0.id, $0) })
+    // Reactions for the whole edition in one round trip, same as media above —
+    // a per-card fetch would be an N+1 against a feed that shows many cards.
+    let reactions: [Reaction] = try await supabase.from("reactions")
+      .select().in("page_id", values: pageIds)
+      .order("created_at", ascending: true).execute().value
+    let reactionsByPage = Dictionary(grouping: reactions, by: \.pageId)
 
-    let result = pages.map {
-      MagazinePage(page: $0, pageMedia: byPage[$0.id] ?? [], author: $0.submittedBy.flatMap { byId[$0] })
+    // People — page submitters AND reactors, in the round trip that was already
+    // happening. `users` is readable by any signed-in member, so a reactor who
+    // didn't write a page still resolves.
+    let peopleIds = Array(Set(pages.compactMap(\.submittedBy?.uuidString))
+      .union(reactions.map(\.userId.uuidString)))
+    let people: [User] = peopleIds.isEmpty ? [] : try await supabase.from("users")
+      .select().in("id", values: peopleIds).execute().value
+    let byId = Dictionary(uniqueKeysWithValues: people.map { ($0.id, $0) })
+
+    let result = pages.map { page in
+      MagazinePage(
+        page: page,
+        pageMedia: byPage[page.id] ?? [],
+        author: page.submittedBy.flatMap { byId[$0] },
+        reactions: (reactionsByPage[page.id] ?? []).map {
+          ReactionWithAuthor(reaction: $0, author: byId[$0.userId])
+        })
     }
     return Magazine(issue: issue, pages: result)
   }
@@ -156,23 +185,30 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
   /// Cheap staleness probe — just the issue's id, no pages/media.
   func currentIssueId(circleId: UUID) async throws -> UUID? {
     let issues: [Issue] = try await supabase.from("issues")
-      .select().eq("is_live", value: true).eq("circle_id", value: circleId.uuidString)
-      .order("created_at", ascending: false).limit(1).execute().value
+      .select().lt("publish_date", value: Issue.liveCutoff()).eq("circle_id", value: circleId.uuidString)
+      .order("publish_date", ascending: false).limit(1).execute().value
     return issues.first?.id
   }
 
-  /// The edition a submission belongs in: the live one if the week has already
-  /// published, otherwise the draft being assembled — created on this circle's
-  /// first submission of the week. Compose calls this instead of
-  /// `currentIssueId` so the compose phase isn't a dead end.
+  /// The edition a submission belongs in: **always the open draft**, created on
+  /// this circle's first submission of the week.
+  ///
+  /// Never the live edition. A published issue is finished — it's what the
+  /// circle is reading, and appending to it would make new pages materialise
+  /// inside an edition people already went through. Posting during the read
+  /// phase means "put this in next week's issue", which is the draft.
+  ///
+  /// (This deliberately ignores `currentIssueId`. It used to consult it first,
+  /// which was harmless only because publishing was manual and rare — with
+  /// derived liveness there is always a live edition after week one, so that
+  /// branch would have swallowed every submission forever.)
   func issueIdForSubmission(circleId: UUID) async throws -> UUID {
-    if let live = try await currentIssueId(circleId: circleId) { return live }
     if let draft = try await draftIssueId(circleId: circleId) { return draft }
     do {
       return try await createDraftIssue(circleId: circleId)
     } catch {
-      // Lost the race to another member's first submission — the one-draft-per-
-      // circle index rejected our insert, so post into the draft they just made.
+      // Lost the race to another member's first submission — the one-edition-
+      // per-week index rejected our insert, so post into the draft they just made.
       guard let draft = try await draftIssueId(circleId: circleId) else { throw error }
       return draft
     }
@@ -189,11 +225,13 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
     return created.id
   }
 
-  /// The circle's newest unpublished edition, if one is already open.
+  /// The circle's open edition — the soonest one whose closing Saturday hasn't
+  /// passed yet. The mirror image of the live filter, so every issue is on
+  /// exactly one side of the cutoff and no edition can be both or neither.
   func draftIssueId(circleId: UUID) async throws -> UUID? {
     let issues: [Issue] = try await supabase.from("issues")
-      .select().eq("is_live", value: false).eq("circle_id", value: circleId.uuidString)
-      .order("created_at", ascending: false).limit(1).execute().value
+      .select().gte("publish_date", value: Issue.liveCutoff()).eq("circle_id", value: circleId.uuidString)
+      .order("publish_date", ascending: true).limit(1).execute().value
     return issues.first?.id
   }
 
@@ -233,11 +271,11 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
   ///
   /// Instagram can't play inline, so `insta` carries the pre-scraped cover frame
   /// URL + @handle (from compose): we download that still and re-host it in the
-  /// `posters` bucket, storing its path in poster_url and the handle in
-  /// text_content. A failed re-host just leaves poster_url nil — the card falls
-  /// back to its gradient rather than blocking the post.
+  /// circle's folder of the `media` bucket, storing its path in poster_url and
+  /// the handle in text_content. A failed re-host just leaves poster_url nil —
+  /// the card falls back to its gradient rather than blocking the post.
   @discardableResult
-  func createVideoPost(issueId: UUID, authorId: UUID, videoURL: URL, caption: String?,
+  func createVideoPost(issueId: UUID, circleId: UUID, authorId: UUID, videoURL: URL, caption: String?,
                        captionStyle: CaptionStyle, cardShape: CardShape,
                        insta: InstagramEmbed.Meta? = nil, posterFocus: Double? = nil) async throws -> Page {
     var title: String?
@@ -251,7 +289,7 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
 
     var posterPath: String?
     if let insta, case .insta(let id, _)? = VideoSource(videoURL) {
-      posterPath = try? await rehostPoster(from: insta.posterURL, reelID: id)
+      posterPath = try? await rehostImage(from: insta.posterURL, circleId: circleId, named: id)
     }
     try await supabase.from("page_media")
       .insert(PageMediaInsert(pageId: page.id, mediaUrl: videoURL.absoluteString,
@@ -270,22 +308,163 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
     return page
   }
 
-  /// Download the Instagram cover frame and upload it to the `posters` bucket at
-  /// `{reelID}.jpg` (upsert, so re-posting the same reel replaces its file).
-  /// Returns the stored object path.
-  private func rehostPoster(from remote: URL, reelID: String) async throws -> String {
+  /// Every uploaded byte lives here: members' photos and re-hosted reel covers
+  /// alike. Private — reads go through `signedURL`.
+  static let mediaBucket = "media"
+
+  /// Storage paths are `{circleId}/{name}`, and **the prefix is the access
+  /// control**: the bucket's policy only lets you touch a folder whose name is a
+  /// circle you belong to. Every upload has to go through here so nothing can
+  /// land outside a circle's folder by accident.
+  ///
+  /// Lowercased on purpose — Swift's `uuidString` is uppercase but Postgres
+  /// renders `uuid::text` lowercase, so an uppercase folder would compare
+  /// unequal to its own circle and the policy would deny every read.
+  private static func mediaPath(circleId: UUID, name: String) -> String {
+    "\(circleId.uuidString.lowercased())/\(name)"
+  }
+
+  /// Download an image someone else is hosting — an Instagram cover frame, a
+  /// link's og:image — and re-host it in this circle's folder (upsert, so
+  /// re-posting the same thing replaces its file). Returns the stored path.
+  ///
+  /// Re-hosted rather than hot-linked because the far end's URL expires, blocks
+  /// hot-linking, or changes what it serves; a stored copy also means the feed
+  /// isn't announcing every reader to a third party.
+  private func rehostImage(from remote: URL, circleId: UUID, named name: String) async throws -> String {
     let (data, _) = try await URLSession.shared.data(from: remote)
-    let path = "\(reelID).jpg"
-    try await supabase.storage.from("posters")
+    return try await upload(data, circleId: circleId, name: "\(name).jpg")
+  }
+
+  /// Put a JPEG in a circle's folder and hand back its stored path.
+  private func upload(_ data: Data, circleId: UUID, name: String) async throws -> String {
+    let path = Self.mediaPath(circleId: circleId, name: name)
+    try await supabase.storage.from(Self.mediaBucket)
       .upload(path, data: data, options: FileOptions(contentType: "image/jpeg", upsert: true))
     return path
   }
 
-  /// A short-lived signed URL for a poster in the private `posters` bucket —
-  /// the bucket is authed-only, so the feed regenerates one each time a card
-  /// appears (cheap, and never a dead link since it's our bucket).
-  func posterSignedURL(path: String) async -> URL? {
-    try? await supabase.storage.from("posters").createSignedURL(path: path, expiresIn: 3600)
+  /// A short-lived signed URL for a stored object — the bucket is private, so
+  /// the feed regenerates one each time a card appears (cheap, and never a dead
+  /// link since it's our bucket). Signing is itself gated by the bucket policy,
+  /// so a path belonging to a circle you left won't sign.
+  func signedURL(path: String) async -> URL? {
+    try? await supabase.storage.from(Self.mediaBucket).createSignedURL(path: path, expiresIn: 3600)
+  }
+
+  /// Creates a photo post: upload the JPEG into the circle's folder, then a page
+  /// whose single media row is that stored path (`media_type: "image"`). The
+  /// path is stored, not a URL — the bucket is private, so the feed signs it at
+  /// render time.
+  ///
+  /// Ordering is deliberate: upload first, so a storage failure means no page
+  /// at all rather than a page with nothing in it. Unlike the poster re-host —
+  /// which is decoration a card can live without — the photo IS the post.
+  @discardableResult
+  func createPhotoPost(issueId: UUID, circleId: UUID, authorId: UUID, jpeg: Data,
+                       caption: String?, captionStyle: CaptionStyle,
+                       cardShape: CardShape) async throws -> Page {
+    let path = try await upload(jpeg, circleId: circleId, name: "\(UUID().uuidString).jpg")
+
+    let page: Page = try await supabase.from("pages")
+      .insert(PageInsert(issueId: issueId, submittedBy: authorId, title: nil,
+                         caption: caption, captionStyle: captionStyle, cardShape: cardShape))
+      .select().single().execute().value
+    try await supabase.from("page_media")
+      .insert(PageMediaInsert(pageId: page.id, mediaUrl: path, mediaType: "image", position: 0))
+      .execute()
+
+    if let caption {
+      _ = try? await supabase.from("comments")
+        .insert(CommentInsert(pageId: page.id, userId: authorId, body: caption))
+        .execute()
+    }
+    return page
+  }
+
+  /// Creates a link post — anything with no player of its own. The scraped
+  /// headline goes in the page's title (the same column a YouTube title lands
+  /// in) and the link itself in media_url as `media_type: "article"`.
+  ///
+  /// `meta` is whatever compose already scraped, so posting doesn't re-fetch
+  /// the page: the author approved a specific preview and that's what ships.
+  /// Nil metadata is a normal post — the card names the link by its host.
+  ///
+  /// The og:image is re-hosted best-effort. Unlike a photo post, where the image
+  /// IS the post, a link stands up fine without one, so a failed re-host leaves
+  /// poster_url nil instead of failing the submission.
+  @discardableResult
+  func createLinkPost(issueId: UUID, circleId: UUID, authorId: UUID, url: URL,
+                      meta: OpenGraph.Meta?, caption: String?,
+                      captionStyle: CaptionStyle) async throws -> Page {
+    let page: Page = try await supabase.from("pages")
+      .insert(PageInsert(issueId: issueId, submittedBy: authorId,
+                         title: meta?.title ?? meta?.siteName,
+                         caption: caption, captionStyle: captionStyle,
+                         // Links size to their own card, so the shape is inert;
+                         // .wide keeps the column non-null and honest.
+                         cardShape: .wide))
+      .select().single().execute().value
+
+    var imagePath: String?
+    if let image = meta?.imageURL {
+      // Named for the page, not the link: two members sharing the same article
+      // each get their own copy rather than racing to overwrite one file.
+      imagePath = try? await rehostImage(from: image, circleId: circleId,
+                                         named: page.id.uuidString.lowercased())
+    }
+    try await supabase.from("page_media")
+      .insert(PageMediaInsert(pageId: page.id, mediaUrl: url.absoluteString,
+                              mediaType: "article", posterUrl: imagePath, position: 0))
+      .execute()
+
+    if let caption {
+      _ = try? await supabase.from("comments")
+        .insert(CommentInsert(pageId: page.id, userId: authorId, body: caption))
+        .execute()
+    }
+    return page
+  }
+
+  // MARK: Reactions
+
+  /// Where a reaction photo lives, relative to the circle's folder. Deterministic
+  /// on purpose: reacting again overwrites the same object instead of leaving the
+  /// old one behind, so there's nothing to clean up.
+  ///
+  /// Lowercased, both ids. Swift's `uuidString` is uppercase and Postgres renders
+  /// `uuid::text` lowercase — the same mismatch that made the storage policy deny
+  /// everything once already (see `mediaPath`).
+  nonisolated static func reactionName(pageId: UUID, userId: UUID) -> String {
+    "reactions/\(pageId.uuidString.lowercased())-\(userId.uuidString.lowercased()).jpg"
+  }
+
+  /// React to a page with a photo, replacing your previous reaction if you had
+  /// one — the DB's UNIQUE(page_id, user_id) makes "one per person" a fact rather
+  /// than something the client has to remember.
+  ///
+  /// Upload first, like `createPhotoPost`: a storage failure then means no row at
+  /// all, rather than a row pointing at a photo that isn't there.
+  @discardableResult
+  func upsertReaction(pageId: UUID, circleId: UUID, userId: UUID, jpeg: Data) async throws -> Reaction {
+    let path = try await upload(jpeg, circleId: circleId,
+                                name: Self.reactionName(pageId: pageId, userId: userId))
+    return try await supabase.from("reactions")
+      .upsert(ReactionInsert(pageId: pageId, userId: userId, mediaPath: path),
+              onConflict: "page_id,user_id")
+      .select().single().execute().value
+  }
+
+  /// Take your reaction back. The stored photo is left behind — it's in a private
+  /// bucket only this circle can read, and reacting again reclaims it. Deleting it
+  /// would need a storage DELETE policy, and the obvious version of that policy
+  /// would also let anyone delete anyone else's post photo.
+  func deleteReaction(pageId: UUID, userId: UUID) async throws {
+    try await supabase.from("reactions")
+      .delete()
+      .eq("page_id", value: pageId.uuidString)
+      .eq("user_id", value: userId.uuidString)
+      .execute()
   }
 
   /// A page's comments, oldest first, each paired with its author (one extra
@@ -329,18 +508,42 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
         return circle
     }
 
-    /// The subset of `memberIds` who have submitted a page to the current live
-    /// issue. Empty when no issue is live.
-    func submitterIds(among memberIds: [UUID], circleId: UUID) async throws -> Set<UUID> {
-        guard let issueId = try await currentIssueId(circleId: circleId) else { return [] }
+    /// Who has put something into the edition being assembled, and when.
+    ///
+    /// Deliberately returns no content — during the compose phase members see
+    /// THAT others contributed, not what. RLS enforces that (`page_media` stays
+    /// unreadable until the issue publishes); selecting only these two columns
+    /// means this can't leak by accident either.
+    ///
+    /// Empty when no draft is open — nobody has submitted this week yet.
+    func draftSubmissions(circleId: UUID) async throws -> [Submission] {
+        guard let issueId = try await draftIssueId(circleId: circleId) else { return [] }
         struct Row: Decodable {
             let submittedBy: UUID?
-            enum CodingKeys: String, CodingKey { case submittedBy = "submitted_by" }
+            let createdAt: Date?
+            enum CodingKeys: String, CodingKey {
+                case submittedBy = "submitted_by"
+                case createdAt = "created_at"
+            }
         }
         let rows: [Row] = try await supabase.from("pages")
-            .select("submitted_by").eq("issue_id", value: issueId.uuidString)
-            .in("submitted_by", values: memberIds.map(\.uuidString)).execute().value
-        return Set(rows.compactMap(\.submittedBy))
+            .select("submitted_by, created_at").eq("issue_id", value: issueId.uuidString)
+            .order("created_at", ascending: true).execute().value
+        return rows.compactMap { row in
+            row.submittedBy.map { Submission(authorId: $0, at: row.createdAt ?? .now) }
+        }
+    }
+
+    /// The subset of `memberIds` who have contributed to the edition being
+    /// assembled — the roster's "who's in this week".
+    ///
+    /// The DRAFT, not the live issue: under derived liveness there's always a
+    /// live edition after week one, so asking about that one would show last
+    /// week's contributors forever and never this week's.
+    func submitterIds(among memberIds: [UUID], circleId: UUID) async throws -> Set<UUID> {
+        let members = Set(memberIds)
+        return Set(try await draftSubmissions(circleId: circleId)
+            .map(\.authorId).filter(members.contains))
     }
 
     /// Joins the circle behind an invite code and returns it with its full

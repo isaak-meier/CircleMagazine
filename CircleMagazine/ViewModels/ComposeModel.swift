@@ -27,23 +27,68 @@ final class ComposeModel {
         var insta: InstagramEmbed.Meta? = nil
     }
 
+    /// What the author has staged to post. One case at a time by construction —
+    /// a link and a photo can't both be half-entered, and "nothing yet" is the
+    /// nil, not a third case to forget about.
+    enum Draft {
+        case link(Resolved)
+        case photo(Photo)
+        case web(WebLink)
+    }
+
+    /// A pasted link with no player of its own. `meta` is what the scrape found,
+    /// nil included — a page that publishes nothing is still postable, so the
+    /// absence of metadata is a value here rather than a failure to handle.
+    struct WebLink {
+        let url: URL
+        let meta: OpenGraph.Meta?
+    }
+
+    /// A picked photo, already encoded to the bytes that get uploaded. The
+    /// shape is the author's framing choice, same as a link card's.
+    struct Photo {
+        let jpeg: Data
+        var shape: CardShape = .square
+        /// A local URL for the preview, so the card renders the real photo
+        /// without a round trip through storage.
+        let previewURL: URL
+    }
+
     var linkText = ""
     var caption = ""
     var captionStyle: CaptionStyle = .paperPlate
     /// Author-chosen vertical crop for a reel poster (0 top…1 bottom), set by
     /// dragging the preview. Centered until they move it.
     var posterFocus: Double = 0.5
-    private(set) var resolved: Resolved?
+    private(set) var draft: Draft?
+    /// The staged link, when that's what's staged. Derived from `draft` rather
+    /// than stored alongside it — there's still exactly one source of truth.
+    var resolved: Resolved? {
+        if case .link(let r) = draft { return r }
+        return nil
+    }
+    /// The staged photo, likewise.
+    var photo: Photo? {
+        if case .photo(let p) = draft { return p }
+        return nil
+    }
+    /// The staged plain link, likewise.
+    var webLink: WebLink? {
+        if case .web(let w) = draft { return w }
+        return nil
+    }
     private(set) var isResolving = false
     private(set) var phase: Phase = .editing
     private(set) var errorText: String?
 
     private let db: DatabaseService
-    /// The live edition to post into. The feed provides it when loaded; when it
-    /// couldn't (feed error), post() asks the DB directly rather than staying dead.
-    private var issueId: UUID?
-    /// The circle being posted into — used to ask the DB for the live edition
-    /// when the caller didn't already hand us an issue id.
+    /// The circle being posted into. The edition is NOT passed in — `post()`
+    /// asks the DB which one a submission belongs in, every time.
+    ///
+    /// The caller used to seed the loaded (live) issue id to save a round trip.
+    /// That silently became "post into the edition everyone is currently
+    /// reading" once liveness was derived, so the only safe answer is to not
+    /// let a caller name the edition at all.
     private let circleId: UUID
     private(set) var resolveTask: Task<Void, Never>?   // exposed so tests can await it
     /// Stamps each resolve pass; a pass only touches state while its stamp is
@@ -51,14 +96,20 @@ final class ComposeModel {
     private var resolveGeneration = 0
     let author: User
 
-    init(db: DatabaseService, issueId: UUID?, circleId: UUID, author: User) {
+    init(db: DatabaseService, circleId: UUID, author: User) {
         self.db = db
-        self.issueId = issueId
         self.circleId = circleId
         self.author = author
     }
 
-    var canPost: Bool { resolved != nil && phase == .editing }
+    var canPost: Bool { draft != nil && phase == .editing }
+
+    /// "August 1" — the edition this submission joins.
+    var editionName: String { EditionCountdown.editionName() }
+    /// "Sunday, August 2" — when it becomes readable. Named explicitly because
+    /// posting mid-week and then finding nothing in the live edition is the
+    /// single most confusing thing about the weekly cycle.
+    var opensOn: String { EditionCountdown.opensOn() }
 
     /// Kick off `resolve`, replacing any fetch already in flight.
     func startResolving() {
@@ -78,16 +129,25 @@ final class ComposeModel {
         isResolving = false
     }
 
-    /// Parse the pasted link and, for YouTube, pull the title for the live preview.
+    /// Parse the pasted link and fetch whatever the source can tell us about it —
+    /// a YouTube title, an Instagram cover frame, or Open Graph tags for anything
+    /// else. Every fetch here is best-effort: a miss previews with less, it
+    /// doesn't block the post.
     private func resolve(generation: Int) async {
         guard generation == resolveGeneration else { return }   // cancelled before we began
         let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
         log.info("resolve start: '\(trimmed, privacy: .public)'")
-        guard let url = URL(string: trimmed), let source = VideoSource(url), !isRawFile(source) else {
+        guard let url = URL(string: trimmed), let source = VideoSource(url) else {
             log.info("resolve exit: unparseable link")
-            resolved = nil
+            draft = nil
             isResolving = false
-            errorText = "Paste a YouTube or Instagram link."
+            errorText = "That doesn't look like a link."
+            return
+        }
+        // Anything that isn't a player we can embed is a plain web link, and
+        // `.rawFile` is how VideoSource spells "some other URL".
+        if isRawFile(source) {
+            await resolveWebLink(url, generation: generation)
             return
         }
         errorText = nil
@@ -121,10 +181,55 @@ final class ComposeModel {
             }
         case .rawFile: break
         }
-        resolved = Resolved(videoURL: url, source: source, title: title,
-                            shape: CardShape(mediaURL: url), insta: insta)
+        draft = .link(Resolved(videoURL: url, source: source, title: title,
+                               shape: CardShape(mediaURL: url), insta: insta))
         isResolving = false
         log.info("resolve exit: resolved, title=\(title ?? "nil", privacy: .public)")
+    }
+
+    /// A link with no player: scrape Open Graph tags for the preview and stage
+    /// it either way.
+    ///
+    /// The scrape can't fail the paste. Most of the web publishes no usable
+    /// metadata, and "this site didn't fill in its meta tags" is not a reason a
+    /// member can't share it — the card falls back to naming it by its host.
+    private func resolveWebLink(_ url: URL, generation: Int) async {
+        // http is refused up front rather than after a round trip: the fetch
+        // would be blocked by App Transport Security anyway, and the author
+        // deserves the reason now.
+        guard url.scheme == "https" else {
+            log.info("resolve exit: non-https link")
+            draft = nil
+            isResolving = false
+            errorText = "Links need to start with https."
+            return
+        }
+        errorText = nil
+        isResolving = true
+        let meta = await OpenGraph.fetch(url)
+        guard generation == resolveGeneration else {
+            log.info("resolve exit: cancelled/superseded mid-scrape")
+            return   // canceller or successor owns the state now
+        }
+        draft = .web(WebLink(url: url, meta: meta))
+        isResolving = false
+        log.info("resolve exit: web link, metadata=\(meta != nil, privacy: .public)")
+    }
+
+    /// Stage a photo the author picked. Replaces whatever was staged — picking a
+    /// photo after pasting a link swaps the draft rather than stacking on it.
+    func stagePhoto(jpeg: Data, previewURL: URL, shape: CardShape = .square) {
+        cancelResolving()          // a link still resolving would land on top of this
+        linkText = ""
+        errorText = nil
+        draft = .photo(Photo(jpeg: jpeg, shape: shape, previewURL: previewURL))
+    }
+
+    /// The framing the photo card uses. No-op unless a photo is staged.
+    func setPhotoShape(_ shape: CardShape) {
+        guard case .photo(var p) = draft else { return }
+        p.shape = shape
+        draft = .photo(p)
     }
 
     private func isRawFile(_ source: VideoSource) -> Bool {
@@ -132,38 +237,52 @@ final class ComposeModel {
         return false
     }
 
+    /// Unstage whatever's staged, back to the pick step.
     func clearLink() {
-        resolved = nil
+        draft = nil
         linkText = ""
         errorText = nil
         posterFocus = 0.5
     }
 
     func post() async {
-        guard let resolved, phase == .editing else { return }
+        guard let draft, phase == .editing else { return }
         phase = .posting
         errorText = nil
-        // No id from the feed means either the feed errored or the week hasn't
-        // published yet; both resolve to "the edition this belongs in", which
-        // opens a draft if this is the circle's first submission of the week.
-        if issueId == nil {
-            issueId = try? await db.issueIdForSubmission(circleId: circleId)
-        }
-        guard let issueId else {
+        // Asked fresh on every post: the answer is the circle's open draft,
+        // opened here if this is the first submission of the week. Never cached
+        // across posts — the edition rolls over at the week boundary, and a
+        // sheet left open across it would otherwise write into last week.
+        guard let issueId = try? await db.issueIdForSubmission(circleId: circleId) else {
             errorText = "Couldn't open this week's edition — try again in a moment."
             phase = .editing
             return
         }
+        let note = caption.isEmpty ? nil : caption
         do {
-            try await db.createVideoPost(
-                issueId: issueId, authorId: author.id,
-                videoURL: resolved.videoURL,
-                caption: caption.isEmpty ? nil : caption,
-                captionStyle: captionStyle, cardShape: resolved.shape,
-                insta: resolved.insta, posterFocus: posterFocus)
+            switch draft {
+            case .link(let resolved):
+                try await db.createVideoPost(
+                    issueId: issueId, circleId: circleId, authorId: author.id,
+                    videoURL: resolved.videoURL, caption: note,
+                    captionStyle: captionStyle, cardShape: resolved.shape,
+                    insta: resolved.insta, posterFocus: posterFocus)
+            case .photo(let photo):
+                try await db.createPhotoPost(
+                    issueId: issueId, circleId: circleId, authorId: author.id,
+                    jpeg: photo.jpeg, caption: note,
+                    captionStyle: captionStyle, cardShape: photo.shape)
+            case .web(let link):
+                // The metadata scraped at paste time, not a fresh fetch: the
+                // author approved a specific preview and that's what ships.
+                try await db.createLinkPost(
+                    issueId: issueId, circleId: circleId, authorId: author.id,
+                    url: link.url, meta: link.meta, caption: note,
+                    captionStyle: captionStyle)
+            }
             phase = .posted
         } catch {
-            errorText = "Couldn't post your video — \(error.localizedDescription)"
+            errorText = "Couldn't post — \(error.localizedDescription)"
             phase = .editing
         }
     }
@@ -176,8 +295,8 @@ extension ComposeModel {
     /// `private(set)`, which only this file can reach.
     func previewResolved(url: String, title: String?) {
         guard let u = URL(string: url), let source = VideoSource(u) else { return }
-        resolved = Resolved(videoURL: u, source: source, title: title,
-                            shape: CardShape(mediaURL: u))
+        draft = .link(Resolved(videoURL: u, source: source, title: title,
+                               shape: CardShape(mediaURL: u)))
     }
 
     func previewMarkPosted() { phase = .posted }

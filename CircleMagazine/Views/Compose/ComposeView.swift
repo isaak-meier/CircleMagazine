@@ -9,6 +9,7 @@
 //
 
 import SwiftUI
+import PhotosUI   // PhotosPicker — no library permission prompt, the system owns the picker
 import UIKit   // UIPasteboard
 
 struct ComposeView: View {
@@ -16,6 +17,12 @@ struct ComposeView: View {
     /// True when the clipboard holds something that looks like a link, learned
     /// via detectPatterns — metadata only, so it never triggers the paste prompt.
     @State private var clipboardHasURL = false
+    /// The picker's selection. Watched rather than read, so loading the bytes
+    /// stays off the main thread until the author actually picks something.
+    @State private var pickedItem: PhotosPickerItem?
+    @State private var loadingPhoto = false
+    /// The confirmation's measured height, so the sheet can shrink to it.
+    @State private var confirmationHeight: CGFloat = 0
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     /// Called when the post lands, so the feed can refresh to include it.
@@ -42,19 +49,83 @@ struct ComposeView: View {
                     grabber
                     header
                     ScrollView {
-                        if model.resolved == nil { pasteStep } else { composeStep }
+                        if model.draft == nil { pasteStep } else { composeStep }
                     }
                     .scrollDismissesKeyboard(.interactively)
                 }
             }
         }
         .background(Style.paper)
-        .presentationDetents([.large])
+        .modifier(SheetHeight(contentHeight: model.phase == .posted ? confirmationHeight : nil))
         .presentationDragIndicator(.hidden)
+        // Decoding happens here rather than in the model: PhotosPickerItem is a
+        // SwiftUI type, so keeping it out of ComposeModel is what lets the model
+        // be tested without the photo library.
+        .task(id: pickedItem) { await loadPickedPhoto() }
+    }
+
+    /// Pull the picked photo's bytes and stage them. A HEIC from the library is
+    /// re-encoded to JPEG, since that's what the bucket serves and what every
+    /// client can decode.
+    private func loadPickedPhoto() async {
+        guard let pickedItem else { return }
+        loadingPhoto = true
+        defer { loadingPhoto = false }
+        guard let raw = try? await pickedItem.loadTransferable(type: Data.self),
+              let image = UIImage(data: raw),
+              let jpeg = image.jpegData(compressionQuality: 0.85),
+              let url = writePreview(jpeg) else { return }
+        // Portrait shots get the tall slot, everything else the square one, so
+        // the common camera-roll photo isn't cropped by default.
+        model.stagePhoto(jpeg: jpeg, previewURL: url,
+                         shape: image.size.height > image.size.width ? .tall : .square)
+    }
+
+    /// AsyncImage wants a URL, so the preview bytes go to a temp file. Named for
+    /// the sheet, overwritten each pick — the OS reclaims tmp, and a stale one
+    /// is at most a single file.
+    private func writePreview(_ jpeg: Data) -> URL? {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("compose-preview.jpg")
+        do {
+            try jpeg.write(to: url, options: .atomic)
+            // Same path every time, so AsyncImage would serve the previous
+            // photo from cache. A unique query defeats that without a new file.
+            return URL(string: "\(url.absoluteString)?v=\(UUID().uuidString)")
+        } catch {
+            return nil
+        }
     }
 
     private var grabber: some View {
         Capsule().fill(Style.rule).frame(width: 36, height: 4).padding(.top, 10)
+    }
+
+    /// The confirmation is a short block of text, so the sheet shrinks to the
+    /// height that block actually measures instead of stranding it in the middle
+    /// of a full-height page. The editing steps stay `.large`: they scroll and
+    /// raise a keyboard, which a self-sizing sheet would resize underneath.
+    ///
+    /// A measured detent rather than `presentationSizing(.fitted)`: fitted keeps
+    /// the sheet's original bounds when the phase changes mid-presentation, so
+    /// the page stayed full height and merely went blank behind the text.
+    private struct SheetHeight: ViewModifier {
+        let contentHeight: CGFloat?
+        func body(content: Content) -> some View {
+            if let contentHeight, contentHeight > 0 {
+                content.presentationDetents([.height(contentHeight)])
+            } else {
+                content.presentationDetents([.large])
+            }
+        }
+    }
+
+    /// Reports the confirmation's laid-out height up to the sheet.
+    private struct HeightKey: PreferenceKey {
+        static var defaultValue: CGFloat { 0 }
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            value = max(value, nextValue())
+        }
     }
 
     // MARK: Header
@@ -95,8 +166,8 @@ struct ComposeView: View {
 
     private var pasteStep: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Share a video").font(.system(size: 23, weight: .bold, design: .serif))
-            Text("Paste a YouTube or Instagram link to feature it in this Sunday's edition.")
+            Text("Add to the edition").font(.system(size: 23, weight: .bold, design: .serif))
+            Text("Pick a photo, or paste any link, for the \(model.editionName) edition.")
                 .font(Style.body).foregroundStyle(Style.meta).padding(.top, 7)
 
             typePills.padding(.vertical, 18)
@@ -105,7 +176,7 @@ struct ComposeView: View {
             // no permission prompt. The suggestion chip below is the fast path.
             HStack(spacing: 11) {
                 Image(systemName: "link").font(.system(size: 15)).foregroundStyle(Color(hex: 0xB4AFA8))
-                TextField("Paste a YouTube or Instagram link", text: $model.linkText)
+                TextField("Paste a link", text: $model.linkText)
                     .font(.system(size: 13.5))
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .keyboardType(.URL)
@@ -195,7 +266,7 @@ struct ComposeView: View {
     }
 
     private var typePills: some View {
-        // ponytail: only Link is wired; Photo/Write are inert placeholders matching the mockup's three-up.
+        // ponytail: Write is still an inert placeholder from the mockup's three-up.
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "link").font(.system(size: 11, weight: .semibold))
@@ -205,12 +276,27 @@ struct ComposeView: View {
             .padding(.horizontal, 14).padding(.vertical, 7)
             .background(Style.ink, in: Capsule())
 
-            ForEach(["Photo", "Write"], id: \.self) { label in
-                Text(label)
-                    .font(.system(size: 12.5, weight: .medium)).foregroundStyle(Color(hex: 0xA8A39C))
-                    .padding(.horizontal, 14).padding(.vertical, 7)
-                    .overlay(Capsule().stroke(Style.rule, lineWidth: 1))
+            // The system picker: it runs out of process, so picking one photo
+            // needs no library permission and no prompt.
+            PhotosPicker(selection: $pickedItem, matching: .images, photoLibrary: .shared()) {
+                HStack(spacing: 6) {
+                    if loadingPhoto {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "photo").font(.system(size: 11, weight: .semibold))
+                    }
+                    Text("Photo")
+                }
+                .font(.system(size: 12.5, weight: .medium)).foregroundStyle(Style.ink)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .overlay(Capsule().stroke(Style.rule, lineWidth: 1))
             }
+            .buttonStyle(.plain)
+
+            Text("Write")
+                .font(.system(size: 12.5, weight: .medium)).foregroundStyle(Color(hex: 0xA8A39C))
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .overlay(Capsule().stroke(Style.rule, lineWidth: 1))
         }
     }
 
@@ -247,7 +333,149 @@ struct ComposeView: View {
 
     @ViewBuilder
     private var composeStep: some View {
-        if let resolved = model.resolved {
+        switch model.draft {
+        case .link(let resolved): linkComposeStep(resolved)
+        case .photo(let photo):   photoComposeStep(photo)
+        case .web(let link):      webComposeStep(link)
+        case nil:                 EmptyView()
+        }
+    }
+
+    /// A plain link: the same chip → preview → note → spine as the others. It
+    /// sizes to its own card, so no fixed height — a link with no cover image is
+    /// a couple of lines tall and shouldn't be padded out to look broken.
+    private func webComposeStep(_ link: ComposeModel.WebLink) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let err = model.errorText {
+                ErrorBanner(message: err).padding(.bottom, 14)
+            }
+
+            webChip(link)
+
+            sectionLabel("How it appears in the edition").padding(.top, 18).padding(.bottom, 11)
+            CardView(viewModel: CardViewModel(
+                previewingLink: link.url, meta: link.meta, author: model.author,
+                caption: model.caption.isEmpty ? nil : model.caption,
+                captionStyle: model.captionStyle))
+                .allowsHitTesting(false)
+
+            Spacer()
+            noteField
+            editionSpine
+        }
+        .padding(.horizontal, Style.Space.lg).padding(.top, 18)
+    }
+
+    /// Says which link is staged and, quietly, whether the site gave us anything
+    /// to show — so "no picture" reads as the site's doing, not a bug.
+    private func webChip(_ link: ComposeModel.WebLink) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: "link").font(.system(size: 15)).foregroundStyle(Style.edition)
+            Text(link.url.host() ?? link.url.absoluteString)
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(Style.ink)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            if link.meta == nil {
+                Text("No preview").font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Style.meta)
+            } else {
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark").font(.system(size: 11, weight: .bold))
+                    Text("Linked").font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(Color(hex: 0x1F8A5B))
+            }
+            Button { model.clearLink() } label: {
+                Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Style.meta)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .background(.white, in: RoundedRectangle(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 13).stroke(Style.rule, lineWidth: 1))
+    }
+
+    /// A staged photo: the same chip → preview → note → "appears in" spine as a
+    /// link, with the shape picker standing in for the link's crop drag.
+    private func photoComposeStep(_ photo: ComposeModel.Photo) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let err = model.errorText {
+                ErrorBanner(message: err).padding(.bottom, 14)
+            }
+
+            photoChip
+
+            sectionLabel("How it appears in the edition").padding(.top, 18).padding(.bottom, 11)
+            CardView(viewModel: CardViewModel(
+                previewingPhoto: photo.previewURL, author: model.author,
+                caption: model.caption.isEmpty ? nil : model.caption,
+                captionStyle: model.captionStyle, cardShape: photo.shape))
+                .allowsHitTesting(false)
+
+            shapePicker(photo.shape).padding(.top, 14)
+
+            Spacer()
+            noteField
+            editionSpine
+        }
+        .padding(.horizontal, Style.Space.lg).padding(.top, 18)
+    }
+
+    private var photoChip: some View {
+        HStack(spacing: 11) {
+            Image(systemName: "photo.fill").font(.system(size: 16)).foregroundStyle(Style.edition)
+            Text("Photo from your library")
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(Style.ink)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            HStack(spacing: 5) {
+                Image(systemName: "checkmark").font(.system(size: 11, weight: .bold))
+                Text("Added").font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(Color(hex: 0x1F8A5B))
+            Button {
+                pickedItem = nil
+                model.clearLink()
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Style.meta)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .background(.white, in: RoundedRectangle(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 13).stroke(Style.rule, lineWidth: 1))
+    }
+
+    /// How the photo sits on the page. Seeded from the photo's own orientation,
+    /// so most authors never touch it.
+    private func shapePicker(_ current: CardShape) -> some View {
+        HStack(spacing: 8) {
+            sectionLabel("Shape")
+            ForEach(CardShape.allCases, id: \.self) { shape in
+                let selected = shape == current
+                Button { model.setPhotoShape(shape) } label: {
+                    Text(shape.displayName)
+                        .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? Style.paper : Color(hex: 0xA8A39C))
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background { if selected { Capsule().fill(Style.ink) } }
+                        .overlay { if !selected { Capsule().stroke(Style.rule, lineWidth: 1) } }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var editionSpine: some View {
+        HStack(spacing: 9) {
+            SwiftUI.Circle().fill(Style.edition).frame(width: 7, height: 7)
+            (Text("Appears in the ").foregroundStyle(Style.meta)
+             + Text("\(model.editionName) edition").foregroundStyle(Style.ink).bold()
+             + Text(" · live \(model.opensOn)").foregroundStyle(Style.meta))
+                .font(.system(size: 11.5))
+        }
+    }
+
+    private func linkComposeStep(_ resolved: ComposeModel.Resolved) -> some View {
             VStack(alignment: .leading, spacing: 0) {
                 if let err = model.errorText {
                     ErrorBanner(message: err).padding(.bottom, 14)
@@ -291,17 +519,9 @@ struct ComposeView: View {
 
                 noteField
 
-//                Rectangle().fill(hairline).frame(height: 1).padding(.vertical, 18)
-
-                HStack(spacing: 9) {
-                    SwiftUI.Circle().fill(Style.edition).frame(width: 7, height: 7)
-                    (Text("Appears in ").foregroundStyle(Style.meta)
-                     + Text("This Sunday's Edition").foregroundStyle(Style.ink).bold())
-                        .font(.system(size: 11.5))
-                }
+                editionSpine
             }
             .padding(.horizontal, Style.Space.lg).padding(.top, 18)
-        }
     }
 
     /// Card height per shape so media + plate + note fill it without a void:
@@ -369,27 +589,46 @@ struct ComposeView: View {
     private var confirmation: some View {
         VStack(spacing: 0) {
             grabber
+            // no keyboard and no scrolling here, so one measure settles it
             VStack(spacing: 0) {
                 SwiftUI.Circle().fill(Style.ink).frame(width: 58, height: 58)
                     .overlay(Image(systemName: "checkmark").font(.system(size: 24, weight: .bold)).foregroundStyle(Style.paper))
                 Text("You're in the edition")
                     .font(.system(size: 25, weight: .bold, design: .serif)).padding(.top, 22)
-                Text("Your video joins the other pieces in this Sunday's issue. It goes live with the edition.")
-                    .font(Style.body).foregroundStyle(Style.meta).multilineTextAlignment(.center)
+                // Names the day, not "this Sunday" — an author who posts on
+                // Tuesday and checks Wednesday needs to know nothing is wrong.
+                (Text("Your post joins the ").foregroundStyle(Style.meta)
+                 + Text("\(model.editionName) edition").foregroundStyle(Style.ink).bold()
+                 + Text(". You'll see it \(model.opensOn), when the issue opens.")
+                    .foregroundStyle(Style.meta))
+                    .font(Style.body).multilineTextAlignment(.center)
                     .padding(.top, 10).frame(maxWidth: 280)
 
+                // Only links get the thumbnail recap; a photo's confirmation
+                // stands on its own rather than re-showing what was just picked.
                 if let resolved = model.resolved { scheduledRow(resolved).padding(.top, 26) }
 
                 Button { Task { await onPosted(); dismiss() } } label: {
-                    Text("View this week's edition")
+                    // Dismisses to the circle — which during compose is the
+                    // chat, not an edition. Saying "view the edition" would
+                    // promise the very thing the sentence above defers.
+                    Text("Back to the circle")
                         .font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Style.ink)
                         .overlay(alignment: .bottom) { Rectangle().fill(Style.ink).frame(height: 1.5).offset(y: 3) }
                 }
                 .padding(.top, 24)
             }
-            .frame(maxHeight: .infinity, alignment: .center)
+            // No greedy frame: the sheet sizes to this content, so stretching
+            // to fill would defeat that and re-create the empty page.
+            .padding(.top, 28)
             .padding(.horizontal, 40).padding(.bottom, 40)
         }
+        .background {
+            GeometryReader { geo in
+                Color.clear.preference(key: HeightKey.self, value: geo.size.height)
+            }
+        }
+        .onPreferenceChange(HeightKey.self) { confirmationHeight = $0 }
     }
 
     private func scheduledRow(_ resolved: ComposeModel.Resolved) -> some View {
@@ -400,7 +639,7 @@ struct ComposeView: View {
                 .overlay(Image(systemName: "play.fill").font(.system(size: 8)).foregroundStyle(Style.ink)
                     .padding(5).background(.white.opacity(0.92), in: SwiftUI.Circle()))
             VStack(alignment: .leading, spacing: 3) {
-                Text(resolved.title ?? "Untitled")
+                Text(scheduledName(resolved))
                     .font(.system(size: 13, weight: .bold, design: .serif)).foregroundStyle(Style.ink)
                     .lineLimit(2)
                 Text("Scheduled · \(model.author.username)")
@@ -411,6 +650,19 @@ struct ComposeView: View {
         .padding(.horizontal, 12).padding(.vertical, 9)
         .background(.white, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Style.rule, lineWidth: 1))
+    }
+
+    /// What to call the thing just scheduled. YouTube gives us a title; a reel
+    /// never has one, so it's named by its author the way Instagram names it —
+    /// "Untitled" reads as something went wrong, and nothing did.
+    private func scheduledName(_ resolved: ComposeModel.Resolved) -> String {
+        if let title = resolved.title, !title.isEmpty { return title }
+        if let handle = resolved.insta?.handle, !handle.isEmpty { return "@\(handle)" }
+        switch resolved.source {
+        case .youtube: return "YouTube video"
+        case .insta:   return "Instagram post"
+        case .rawFile: return "Video"
+        }
     }
 
     // YouTube has a keyless thumbnail URL; Instagram doesn't, so fall back to the
@@ -445,7 +697,7 @@ struct ComposeView: View {
 // DEBUG-gated: the previews seed themselves via ComposeModel's debug-only hooks.
 #if DEBUG
 #Preview("Compose step — note in card") {
-    let model = ComposeModel(db: DatabaseService(), issueId: nil, circleId: UUID(),
+    let model = ComposeModel(db: DatabaseService(), circleId: UUID(),
                              author: Magazine.sample.pages[0].author!)
     model.previewResolved(url: "https://www.instagram.com/reels/DZXrc1uuezb/",
                           title: "I Spent 3 Weeks Living Off-Grid in the Mountains")
@@ -453,7 +705,7 @@ struct ComposeView: View {
 }
 
 #Preview("Confirmation") {
-    let model = ComposeModel(db: DatabaseService(), issueId: nil, circleId: UUID(),
+    let model = ComposeModel(db: DatabaseService(), circleId: UUID(),
                              author: Magazine.sample.pages[0].author!)
     model.previewResolved(url: "https://www.youtube.com/watch?v=62bIsvRcPv0",
                           title: "I Spent 3 Weeks Living Off-Grid in the Mountains")

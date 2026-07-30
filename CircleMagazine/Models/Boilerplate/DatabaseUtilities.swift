@@ -57,6 +57,18 @@ struct CommentInsert: Encodable {
     }
 }
 
+struct ReactionInsert: Encodable {
+    let pageId: UUID
+    let userId: UUID
+    let mediaPath: String
+
+    enum CodingKeys: String, CodingKey {
+        case pageId = "page_id"
+        case userId = "user_id"
+        case mediaPath = "media_path"
+    }
+}
+
 struct PageMediaInsert: Encodable {
     let pageId: UUID
     let mediaUrl: String?

@@ -41,6 +41,7 @@ struct CircleViewModelTests {
 
     init() {
         UserDefaults.standard.removeObject(forKey: IssueViewModel.forceComposeKey)
+        UserDefaults.standard.removeObject(forKey: DatabaseService.showDraftKey)
     }
 
     private static func user(_ name: String) -> User {

@@ -6,6 +6,8 @@
 
 import SwiftUI
 import AVKit
+import PhotosUI   // the reaction fallback when there's no camera
+import UIKit      // UIImage, on its way to JPEG bytes
 
 struct CardView: View {
     let viewModel: CardViewModel
@@ -24,22 +26,40 @@ struct CardView: View {
 
     @State private var showComments = false
     @State private var confirmingDelete = false
+    /// The photo being viewed full screen, if any.
+    @State private var fullscreenPhoto: MediaRef?
+    /// Where the reaction photo is coming from — nil when nothing is open. One
+    /// state rather than a Bool per surface, so two pickers can't both be up.
+    @State private var capture: ReactionCapture?
+    @State private var pickedReaction: PhotosPickerItem?
+    @State private var showingReactions = false
 
-    private var commentsEnabled: Bool { issue != nil && me != nil }
-    private var canDelete: Bool { onDelete != nil && me?.id == viewModel.author?.id }
+    /// How the viewer supplies a reaction photo. Camera when there is one and
+    /// we're allowed it; the library otherwise (every simulator, and any device
+    /// where camera access was denied).
+    private enum ReactionCapture { case camera, library }
 
-    // 1a (paperPlate video) has its own Comment/React/Re-circle footer; other
-    // cards get the standalone comment pill.
-    private var showsCommentBar: Bool {
-        if case .video = viewModel.media.first, viewModel.captionStyle == .paperPlate { return false }
-        return true
+    /// The card's photo, when it has one — what a tap opens full screen.
+    private var photo: MediaRef? {
+        if case .image(let ref)? = viewModel.media.first { return ref }
+        return nil
     }
+
+    /// Whether this card can be acted on at all. False in the compose preview,
+    /// which renders a CardView for a post that doesn't exist yet.
+    private var interactive: Bool { issue != nil && me != nil }
+    private var canDelete: Bool { onDelete != nil && me?.id == viewModel.author?.id }
 
     var body: some View {
         VStack(spacing: 0) {
             content
-            if showsCommentBar {
-                CommentBar(action: commentsEnabled ? { showComments = true } : nil)
+            if interactive {
+                CardFooter(card: viewModel,
+                           isReacting: issue?.reactingPageId == viewModel.id,
+                           onComment: { showComments = true },
+                           onReact: { capture = CameraPicker.canUseCamera ? .camera : .library },
+                           onRemoveReaction: { Task { await issue?.unreact(pageId: viewModel.id) } },
+                           onOpenReactions: { showingReactions = true })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -57,6 +77,46 @@ struct CardView: View {
         } message: {
             Text("It's removed from the edition for everyone. This can't be undone.")
         }
+        .fullScreenCover(item: $fullscreenPhoto) { ref in
+            PhotoViewer(ref: ref, issue: issue)
+        }
+        .fullScreenCover(isPresented: presenting(.camera)) {
+            CameraPicker { image in Task { await react(with: image) } }
+        }
+        .photosPicker(isPresented: presenting(.library), selection: $pickedReaction,
+                      matching: .images, photoLibrary: .shared())
+        // Decoding lives here, not in the VM: UIImage and PhotosPickerItem are UI
+        // types, and keeping them out is what lets `react` be tested with bytes.
+        //
+        // An unstructured Task, not `.task(id:)`: reacting refreshes the edition,
+        // which rebuilds this card — and a view-bound task gets cancelled when
+        // that happens, mid-upload. Same reason `onDelete` uses one.
+        .onChange(of: pickedReaction) { _, picked in
+            guard let picked else { return }
+            pickedReaction = nil
+            Task { await react(withPicked: picked) }
+        }
+        .fullScreenCover(isPresented: $showingReactions) {
+            ReactionViewer(reactions: viewModel.reactions, issue: issue)
+        }
+    }
+
+    /// A Bool binding for one capture surface. Set-to-false is a dismissal, so
+    /// closing either picker clears the state; only the tap sets it.
+    private func presenting(_ mode: ReactionCapture) -> Binding<Bool> {
+        Binding(get: { capture == mode }, set: { if !$0 { capture = nil } })
+    }
+
+    private func react(with image: UIImage) async {
+        capture = nil
+        guard let jpeg = image.reactionJPEG() else { return }
+        await issue?.react(pageId: viewModel.id, jpeg: jpeg)
+    }
+
+    private func react(withPicked item: PhotosPickerItem) async {
+        guard let raw = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: raw) else { return }
+        await react(with: image)
     }
 
     // ⋯ menu, shown in the poster row. Native Menu, same as the Circles
@@ -77,7 +137,10 @@ struct CardView: View {
         // ponytail: .first — video-only cards; switch on the full array if mixed cards appear
         switch viewModel.media.first {
         case .video(let source, let instaPoster, let handle, let focus):
-            VideoCard(source: source, author: viewModel.author, caption: viewModel.caption, title: viewModel.title, captionStyle: viewModel.captionStyle, cardShape: viewModel.cardShape, onComment: commentsEnabled ? { showComments = true } : nil, isActive: isActive, trailingAccessory: canDelete ? AnyView(cardMenu) : nil, instaPoster: instaPoster, instaHandle: handle, issue: issue, instaFocus: focus, onInstaFocusChange: onPosterFocusChange)
+            VideoCard(source: source, cardShape: viewModel.cardShape, author: viewModel.author, caption: viewModel.caption, title: viewModel.title, captionStyle: viewModel.captionStyle, onComment: interactive ? { showComments = true } : nil, isActive: isActive, trailingAccessory: canDelete ? AnyView(cardMenu) : nil, instaPoster: instaPoster, instaHandle: handle, issue: issue, instaFocus: focus, onInstaFocusChange: onPosterFocusChange)
+        case .link(let preview):
+            LinkCard(preview: preview, author: viewModel.author, caption: viewModel.caption,
+                     issue: issue, trailingAccessory: canDelete ? AnyView(cardMenu) : nil)
         default:                 standardCard   // image / fallback / empty
         }
     }
@@ -90,8 +153,27 @@ struct CardView: View {
                     .padding(.horizontal, Style.Space.lg)
                     .padding(.bottom, Style.Space.md)
             }
-            CardMediaRegion(card: viewModel)
-                .padding(.horizontal, Style.Space.lg)
+            // Full-bleed: the card is already clipped to its own radius, so the
+            // photo runs to the edges instead of sitting inset on a page.
+            CardMediaRegion(card: viewModel, issue: issue)
+                // The card crops the photo to fill; tapping shows the whole
+                // frame. A bare gesture is invisible to VoiceOver and to UI
+                // automation, so it says what it is.
+                .contentShape(Rectangle())
+                .onTapGesture { fullscreenPhoto = photo }
+                .accessibilityElement()
+                .accessibilityLabel("Photo")
+                .accessibilityHint("Opens full screen")
+                .accessibilityAddTraits(.isButton)
+            // The author's words under their photo, set like a magazine caption.
+            // Video cards carry this in their own plate; without it here a photo
+            // post would silently drop everything the author wrote.
+            if let caption = viewModel.caption, !caption.isEmpty {
+                Text(caption)
+                    .font(Style.body).foregroundStyle(Style.ink)
+                    .padding(.horizontal, Style.Space.lg)
+                    .padding(.top, Style.Space.md)
+            }
             Spacer(minLength: 0)
         }
     }
@@ -111,53 +193,9 @@ private struct AuthorRow: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            avatar
+            Avatar(user: author, diameter: 32)
             Text(author.username).font(Style.byline).foregroundStyle(Style.ink)
         }
-    }
-
-    private var avatar: some View {
-        AsyncImage(url: author.avatarUrl.flatMap(URL.init(string:))) { $0.resizable().scaledToFill() }
-            placeholder: {
-                Style.rule.overlay(
-                    Text(author.username.prefix(1)).font(Style.byline)
-                        .foregroundStyle(Style.meta))
-            }
-            .frame(width: 32, height: 32).clipShape(SwiftUI.Circle())
-    }
-}
-
-// MARK: - Comment bar
-
-// The "Add a comment…" pill that closes every card (design 1a–1d). Sits below
-// whatever content the card rendered, so image and video cards share it.
-private struct CommentBar: View {
-    /// Tap handler — nil renders a static (non-interactive) bar, e.g. in previews.
-    var action: (() -> Void)?
-
-    var body: some View {
-        if let action {
-            Button(action: action) { pill }.buttonStyle(.plain)
-        } else {
-            pill
-        }
-    }
-
-    private var pill: some View {
-        HStack(spacing: 11) {
-            SwiftUI.Circle().fill(Style.rule)
-                .frame(width: 26, height: 26)
-                .overlay(Image(systemName: "person.fill")
-                    .font(.system(size: 11)).foregroundStyle(Style.meta))
-            Text("Add a comment…")
-                .font(.system(size: 14)).foregroundStyle(Color(hex: 0xA8A39C))
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 12)
-        .background(.white, in: RoundedRectangle(cornerRadius: 13))
-        .overlay(RoundedRectangle(cornerRadius: 13).stroke(Style.rule, lineWidth: 1))
-        .padding(.horizontal, Style.Space.lg)
-        .padding(.top, 14).padding(.bottom, Style.Space.lg)
     }
 }
 
@@ -165,23 +203,142 @@ private struct CommentBar: View {
 
 private struct CardMediaRegion: View {
     let card: CardViewModel
+    /// Supplies signed URLs for stored photos. Nil in the compose preview, where
+    /// the ref is already `.direct`.
+    var issue: IssueViewModel? = nil
 
     @ViewBuilder
     var body: some View {
-        if case .image(let url) = card.media.first {
-            PhotoMedia(url: url)
+        if case .image(let ref) = card.media.first {
+            PhotoMedia(ref: ref, issue: issue)
         }
     }
 }
 
-private let mediaHeight: CGFloat = 220
-
+/// A photo page. Fills the card like every other medium — the photo IS the
+/// page, so it takes the whole page rather than sitting on one at its own
+/// aspect ratio. Off-ratio shots crop rather than letterbox.
 private struct PhotoMedia: View {
-    let url: URL?
+    let ref: MediaRef
+    var issue: IssueViewModel?
+
+    @State private var url: URL?
+
     var body: some View {
-        AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { Rectangle().fill(Style.rule) }
-            .frame(maxWidth: .infinity).frame(height: mediaHeight)
-            .clipShape(RoundedRectangle(cornerRadius: Style.mediaRadius))
+        Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                AsyncImage(url: url) { $0.resizable().scaledToFill() }
+                    placeholder: { Rectangle().fill(Style.rule) }
+            }
+            .clipped()
+            // Signed URLs expire, so resolve on appear rather than once at build
+            // time — a card scrolled back to after an hour still loads.
+            .task(id: ref.id) { url = await ref.resolve(with: issue) }
+    }
+}
+
+/// A photo on its own, filling the screen. The card crops to fill, so this is
+/// the only place the whole frame is visible — which is the point of it.
+private struct PhotoViewer: View {
+    let ref: MediaRef
+    var issue: IssueViewModel?
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack {
+            Color.black
+            FullPhoto(ref: ref, issue: issue)
+        }
+        .ignoresSafeArea()
+        .contentShape(Rectangle())
+        .onTapGesture { dismiss() }
+        .overlay(alignment: .topTrailing) { ViewerCloseButton() }
+        // Tap-anywhere is the gesture people reach for, but it's invisible to
+        // VoiceOver and to anyone who doesn't guess — so there's a real button.
+        .accessibilityAction(.escape) { dismiss() }
+    }
+}
+
+/// Everyone's reactions to one card, one per page, each named. The photos are
+/// the point — the cluster shows whose they are, this shows what they took.
+private struct ReactionViewer: View {
+    let reactions: [ReactionViewModel]
+    var issue: IssueViewModel?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var shown: UUID?
+
+    var body: some View {
+        ZStack {
+            Color.black
+            TabView(selection: $shown) {
+                ForEach(reactions) { reaction in
+                    VStack(spacing: Style.Space.lg) {
+                        FullPhoto(ref: reaction.photo, issue: issue)
+                        if let author = reaction.author {
+                            Text(author.username)
+                                .font(Style.byline).foregroundStyle(.white)
+                        }
+                    }
+                    .padding(.vertical, Style.Space.xxl)
+                    .tag(Optional(reaction.id))
+                }
+            }
+            .tabViewStyle(.page)
+        }
+        .ignoresSafeArea()
+        .overlay(alignment: .topTrailing) { ViewerCloseButton() }
+        .accessibilityAction(.escape) { dismiss() }
+        .onAppear { shown = shown ?? reactions.first?.id }
+    }
+}
+
+/// One stored photo, signed and shown whole. Fit, not fill: cards crop, viewers
+/// don't — that's what a viewer is for.
+private struct FullPhoto: View {
+    let ref: MediaRef
+    var issue: IssueViewModel?
+
+    @State private var url: URL?
+
+    var body: some View {
+        AsyncImage(url: url) { image in
+            image.resizable().scaledToFit()
+        } placeholder: {
+            ProgressView().tint(.white)
+        }
+        // Signed afresh: the card's URL may have expired while it sat on screen.
+        .task(id: ref.id) { url = await ref.resolve(with: issue) }
+    }
+}
+
+private struct ViewerCloseButton: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Button { dismiss() } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(12)
+                .background(.black.opacity(0.45), in: SwiftUI.Circle())
+        }
+        .accessibilityLabel("Close")
+        .padding(.top, Style.Space.xl)
+        .padding(.trailing, Style.Space.lg)
+    }
+}
+
+extension MediaRef {
+    /// The loadable URL for this ref: a stored path is signed through the issue
+    /// (the bucket is private), a direct URL is already loadable.
+    func resolve(with issue: IssueViewModel?) async -> URL? {
+        switch self {
+        case .direct(let url):  url
+        case .stored(let path): await issue?.signedURL(path: path)
+        }
     }
 }
 

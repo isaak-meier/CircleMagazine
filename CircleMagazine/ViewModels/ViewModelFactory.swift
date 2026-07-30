@@ -29,6 +29,12 @@ final class ViewModelFactory {
         CirclesViewModel(db: db, store: store, me: me)
     }
 
+    /// Drop every cached edition. The factory (and its store) live as long as the
+    /// app, but ViewModels don't — so without this the next sign-in would find
+    /// the previous account's circles already cached and `warm` would no-op on
+    /// all of them. Called when the session ends.
+    func reset() { store.invalidateAll() }
+
     /// A circle screen's VM graph: the community VM with its edition VM as a
     /// child, both wired to the shared services. The `summary` is already loaded
     /// by the caller (tapped bubble / join result), so this is pure assembly —

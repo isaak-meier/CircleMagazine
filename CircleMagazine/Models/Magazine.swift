@@ -11,10 +11,24 @@ struct Magazine {
     let issue: Issue
     let pages: [MagazinePage]
 
-    // converts the magazine to viewModels, where each page maps to one card
-    var cards: [CardViewModel] {
-        pages.map { page in
-            CardViewModel(from: page)
+    /// The magazine's pages as cards, grouped by medium — every YouTube card,
+    /// then every reel, then the rest. An edition reads as sections rather than
+    /// switching format every swipe, and each group's cards are the same height
+    /// as each other. Bucketed rather than sorted because `sorted` isn't stable:
+    /// within a group, pages keep the order the issue was assembled in.
+    /// `meId` is the viewer, so each card can tell which reaction is theirs.
+    /// Nil (previews, tests that don't care) just means no reaction is "mine".
+    func cards(meId: UUID? = nil) -> [CardViewModel] {
+        // A page with nothing renderable is a blank sheet of paper in the feed —
+        // no media rows at all, or only rows whose url wouldn't parse. Old test
+        // pages look like this, and so does any page whose media a policy
+        // withheld. Dropping it is better than swiping past an empty card.
+        // ponytail: silent. Give it a visible "this post couldn't load" state if
+        // it ever happens to a post someone actually made.
+        let all = pages.map { CardViewModel(from: $0, meId: meId) }
+            .filter { $0.hasRenderableMedia }
+        return CardViewModel.Medium.allCases.flatMap { medium in
+            all.filter { $0.medium == medium }
         }
     }
 
@@ -29,6 +43,9 @@ struct MagazinePage {
     let page: Page
     let pageMedia: [PageMedia]
     var author: User? = nil
+    /// Who reacted to this page, oldest first. Defaulted so previews and the
+    /// sample magazine don't have to know reactions exist.
+    var reactions: [ReactionWithAuthor] = []
 }
 
 extension Magazine {

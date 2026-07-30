@@ -30,6 +30,33 @@ private final class SpyDatabase: DatabaseService, @unchecked Sendable {
     private(set) var fetchCalls: [UUID] = []
     private(set) var deletedPageIds: [UUID] = []
 
+    struct ReactCall: Equatable {
+        let pageId: UUID
+        let circleId: UUID
+        let userId: UUID
+        let bytes: Int
+    }
+    private(set) var reactCalls: [ReactCall] = []
+    private(set) var unreactCalls: [(pageId: UUID, userId: UUID)] = []
+    var reactError: Error?
+    /// Runs while the upload is "in flight", so a test can observe the VM mid-write.
+    var duringReact: (() -> Void)?
+
+    override func upsertReaction(pageId: UUID, circleId: UUID, userId: UUID,
+                                 jpeg: Data) async throws -> Reaction {
+        duringReact?()
+        if let reactError { throw reactError }
+        reactCalls.append(ReactCall(pageId: pageId, circleId: circleId,
+                                    userId: userId, bytes: jpeg.count))
+        return Reaction(id: UUID(), pageId: pageId, userId: userId,
+                        mediaPath: DatabaseService.reactionName(pageId: pageId, userId: userId),
+                        createdAt: nil)
+    }
+
+    override func deleteReaction(pageId: UUID, userId: UUID) async throws {
+        unreactCalls.append((pageId, userId))
+    }
+
     override func fetchCurrentIssue(circleId: UUID) async throws -> Magazine? {
         fetchCalls.append(circleId)
         guard let stubbedMagazine else { throw Boom() }
@@ -54,8 +81,12 @@ struct IssueViewModelTests {
                           role: nil, followCredits: nil, circleSlots: nil,
                           isVerified: nil, createdAt: nil)
 
+    /// Both developer switches live in shared UserDefaults, so a run on a
+    /// simulator where either is flipped would otherwise test the override
+    /// instead of the behaviour.
     init() {
         UserDefaults.standard.removeObject(forKey: IssueViewModel.forceComposeKey)
+        UserDefaults.standard.removeObject(forKey: DatabaseService.showDraftKey)
     }
 
     private func makeVM() -> IssueViewModel {
@@ -279,5 +310,76 @@ struct IssueViewModelTests {
         let vm = makeVM()
         let comments = vm.commentsVM(for: UUID())
         #expect(comments.me.id == me.id)
+    }
+
+    // MARK: - Reactions
+    //
+    // The card hands over a page id and bytes; the circle and the viewer are the
+    // VM's own. That's what stops a card from reacting as somebody else.
+
+    private let jpeg = Data(repeating: 0xFF, count: 128)
+
+    @Test func reactingPostsAsTheViewerIntoThisCircle() async {
+        spy.stubbedMagazine = .some(magazine())
+        let vm = makeVM()
+        let pageId = UUID()
+        await vm.react(pageId: pageId, jpeg: jpeg)
+
+        #expect(spy.reactCalls == [.init(pageId: pageId, circleId: circleId,
+                                         userId: me.id, bytes: 128)])
+    }
+
+    /// The new face has to appear without leaving the screen, so the write is
+    /// followed by a refetch — same shape as `delete`.
+    @Test func reactingRefreshesTheEdition() async {
+        spy.stubbedMagazine = .some(magazine())
+        let vm = makeVM()
+        await vm.refresh()
+        let before = spy.fetchCalls.count
+        await vm.react(pageId: UUID(), jpeg: jpeg)
+        #expect(spy.fetchCalls.count == before + 1)
+    }
+
+    @Test func unreactingDeletesTheViewersOwnReactionAndRefreshes() async {
+        spy.stubbedMagazine = .some(magazine())
+        let vm = makeVM()
+        await vm.refresh()
+        let before = spy.fetchCalls.count
+        let pageId = UUID()
+        await vm.unreact(pageId: pageId)
+
+        #expect(spy.unreactCalls.count == 1)
+        #expect(spy.unreactCalls[0].pageId == pageId)
+        #expect(spy.unreactCalls[0].userId == me.id)
+        #expect(spy.fetchCalls.count == before + 1)
+    }
+
+    /// The card shows progress off this, so it must be set during the upload and
+    /// cleared after — including when the upload throws.
+    @Test func theReactingPageIsFlaggedDuringTheUploadAndClearedAfter() async {
+        spy.stubbedMagazine = .some(magazine())
+        let vm = makeVM()
+        let pageId = UUID()
+        var duringWrite: UUID?
+        spy.duringReact = { duringWrite = vm.reactingPageId }
+
+        await vm.react(pageId: pageId, jpeg: jpeg)
+        #expect(duringWrite == pageId)
+        #expect(vm.reactingPageId == nil)
+    }
+
+    @Test func aFailedReactionClearsTheFlagAndKeepsTheEditionOnScreen() async {
+        spy.stubbedMagazine = .some(magazine())
+        let vm = makeVM()
+        await vm.refresh()
+        spy.reactError = SpyDatabase.Boom()
+
+        await vm.react(pageId: UUID(), jpeg: jpeg)
+        #expect(vm.reactingPageId == nil)
+        // Still the magazine, not a failure screen — a reaction that didn't take
+        // is not a reason to lose the edition you were reading.
+        if case .loaded = vm.state {} else {
+            #expect(Bool(false), "expected the edition to stay loaded")
+        }
     }
 }

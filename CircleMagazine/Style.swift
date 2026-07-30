@@ -28,6 +28,12 @@ enum Style {
     static let edition = Color(hex: 0x1A1A2E)  // edition stamp / accents
     static let chrome  = Color(hex: 0xECEAE7)  // app background behind cards
 
+    /// Behind a member's initials when they have no avatar image. Picked by user
+    /// id, so the same person is the same colour on every screen.
+    static let avatarColors: [Color] = [
+        Color(hex: 0x3E6E8E), Color(hex: 0x8E5A3E), Color(hex: 0x4A7A52), Color(hex: 0x6A5A8E),
+    ]
+
     // Radii.
     static let cardRadius: CGFloat = 20
     static let mediaRadius: CGFloat = 12
@@ -53,10 +59,20 @@ extension View {
 
     /// Full-screen feed card: `feedCardWidth` plus the viewport height less the
     /// next-card peek. The video fills whatever's left above the fixed-height
-    /// plate. Cards that crop to their own content (a reel poster) use just
-    /// `feedCardWidth` and size themselves vertically instead.
+    /// plate. Cards that size to their own media use `feedCardWidth` +
+    /// `feedCardPage` instead, keeping the page while not filling it.
     func feedCardFrame() -> some View {
         feedCardWidth()
+            .containerRelativeFrame(.vertical) { h, _ in h - Style.Space.xxl - Style.Space.sm }
+    }
+
+    /// A full-height page with this card centred in it. Same height as
+    /// `feedCardFrame`, so every card is one swipe whatever its own height.
+    /// `fixedSize` first, because a card is greedy vertically by default and
+    /// would otherwise swallow the page instead of sitting in the middle of it.
+    func feedCardPage() -> some View {
+        fixedSize(horizontal: false, vertical: true)
+            .frame(maxHeight: .infinity)
             .containerRelativeFrame(.vertical) { h, _ in h - Style.Space.xxl - Style.Space.sm }
     }
 }

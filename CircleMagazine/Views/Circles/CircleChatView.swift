@@ -33,6 +33,7 @@ struct CircleChatView: View {
             inputBar
         }
         .background(Style.chrome)
+        .task { await vm.appear() }
     }
 
     // MARK: Header
@@ -178,7 +179,7 @@ struct CircleChatView: View {
                 .frame(width: 20, height: 20)
                 .background(SwiftUI.Circle().fill(Style.ink))
             (Text(row.authorName).fontWeight(.semibold).foregroundStyle(Style.ink)
-             + Text(" submitted a piece to this week's edition"))
+             + Text(" \(row.text)"))
                 .font(.system(size: 11.5))
                 .foregroundStyle(Color(hex: 0x4A4742))
         }

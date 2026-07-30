@@ -8,6 +8,9 @@ import SwiftUI
 struct AuthView: View {
     @Bindable var account: AccountManager
 
+    /// Supabase's emailed OTP length.
+    private static let codeLength = 6
+
     var body: some View {
         VStack(spacing: 0) {
             Masthead(title: title)
@@ -40,11 +43,13 @@ struct AuthView: View {
 
         case .code:
             prompt("Enter the code sent to \(account.email)")
-            TextField("123456", text: $account.code)
-                .keyboardType(.numberPad)
-                .editorialField()
+            // Same boxes as joining a circle by invite code — both are a
+            // six-character code, so they're the same control.
+            CodeField(length: Self.codeLength, input: $account.code, kind: .digits)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button("Verify") { Task { await account.verify() } }
-                .buttonStyle(.primary(loading: account.isLoading)).disabled(account.isLoading)
+                .buttonStyle(.primary(loading: account.isLoading))
+                .disabled(account.isLoading || account.code.count < Self.codeLength)
             Button("Resend") { Task { await account.resendCode() } }
                 .buttonStyle(.link).disabled(account.isLoading)
 

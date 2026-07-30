@@ -9,6 +9,14 @@
 
 import Foundation
 
+/// Someone putting a piece into the edition being assembled: who and when, and
+/// deliberately nothing else. The content stays sealed until the issue
+/// publishes — that's the compose phase's whole shape.
+struct Submission {
+    let authorId: UUID
+    let at: Date
+}
+
 struct ChatMessage: Identifiable {
     enum Kind {
         case text(String)

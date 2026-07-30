@@ -102,11 +102,16 @@ struct CommentsView: View {
         }
     }
 
+    @ViewBuilder
     private func avatar(_ user: User?) -> some View {
-        SwiftUI.Circle().fill(Style.rule)
-            .frame(width: 30, height: 30)
-            .overlay(Text((user?.username.prefix(1)).map(String.init) ?? "?")
-                .font(Style.byline).foregroundStyle(Style.meta))
+        if let user {
+            Avatar(user: user)
+        } else {
+            // A comment whose author didn't come back — someone who left.
+            SwiftUI.Circle().fill(Style.rule)
+                .frame(width: 30, height: 30)
+                .overlay(Text("?").font(Style.byline).foregroundStyle(Style.meta))
+        }
     }
 
     private var inputBar: some View {

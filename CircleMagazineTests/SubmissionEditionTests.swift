@@ -59,15 +59,32 @@ struct SubmissionEditionTests {
     private let spy = SpyDatabase()
     private let circleId = UUID()
 
-    // MARK: - The live edition wins
+    // MARK: - The live edition is never written into
 
-    /// Mid-week, after publishing: submissions join the issue people are reading.
-    @Test func aLiveEditionIsUsedAndNothingIsOpened() async throws {
-        let live = UUID()
+    /// A published issue is finished. Posting while one is live means "next
+    /// week", so the submission goes to the draft — never into the edition the
+    /// circle is currently reading.
+    ///
+    /// This is load-bearing under derived liveness: after week one there is
+    /// ALWAYS a live edition, so a lookup that preferred it would swallow every
+    /// submission forever and no second draft would ever be created.
+    @Test func aLiveEditionIsNeverTheSubmissionTarget() async throws {
+        let live = UUID(), draft = UUID()
         spy.liveIssueId = live
-        #expect(try await spy.issueIdForSubmission(circleId: circleId) == live)
-        #expect(spy.draftCalls == 0)      // never even looked for a draft
-        #expect(spy.createCalls.isEmpty)
+        spy.draftAnswers = [draft]
+        #expect(try await spy.issueIdForSubmission(circleId: circleId) == draft)
+        #expect(spy.liveCalls == 0)        // doesn't even ask what's live
+    }
+
+    /// Same, with no draft open yet: it opens one rather than falling back to
+    /// the live edition.
+    @Test func aLiveEditionDoesNotPreventOpeningTheNextDraft() async throws {
+        let live = UUID(), created = UUID()
+        spy.liveIssueId = live
+        spy.draftAnswers = [nil]
+        spy.createdDraftId = created
+        #expect(try await spy.issueIdForSubmission(circleId: circleId) == created)
+        #expect(spy.createCalls == [circleId])
     }
 
     // MARK: - An open draft is reused
@@ -93,12 +110,12 @@ struct SubmissionEditionTests {
         #expect(spy.createCalls == [circleId])
     }
 
-    @Test func openingADraftIsTriedOnlyAfterBothLookupsMiss() async throws {
+    @Test func openingADraftIsTriedOnlyAfterTheDraftLookupMisses() async throws {
         spy.liveIssueId = nil
         spy.draftAnswers = [nil]
         spy.createdDraftId = UUID()
         _ = try await spy.issueIdForSubmission(circleId: circleId)
-        #expect(spy.liveCalls == 1)
+        #expect(spy.liveCalls == 0)
         #expect(spy.draftCalls == 1)
         #expect(spy.createCalls.count == 1)
     }

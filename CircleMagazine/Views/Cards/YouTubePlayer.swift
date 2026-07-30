@@ -13,7 +13,9 @@ import SwiftUI
 import WebKit
 
 /// Flip to false to bring back our custom control bar (scrubber/play/mute/
-/// fullscreen). true uses YouTube's native controls and hides ours.
+/// fullscreen). true uses YouTube's native controls and hides ours — safe only
+/// while the player keeps its full width on screen, since YouTube's bar spans
+/// the frame and a cropped player would cut its end buttons off.
 private let ytUseNativeControls = true
 
 /// Mute is a per-viewer preference, shared across every card, so unmuting one
@@ -88,6 +90,8 @@ struct YouTubePlayer: View {
     @State private var scrubTime = 0.0
 
     var body: some View {
+        // The card sizes itself to 16:9, so the player just fills what it's
+        // given — no letterboxing to hide and nothing to crop.
         ZStack(alignment: .bottom) {
             if activated {
                 YTWebView(id: id, model: model)
@@ -113,27 +117,36 @@ struct YouTubePlayer: View {
             activated = true
             model.requestPlay()
         } label: {
-            ZStack {
-                Color.black                                   // letterbox, like the player
-                // hqdefault is 4:3 with baked black bars; scaledToFill into a 16:9
-                // box crops those bars away, leaving a clean 16:9 still centered.
-                AsyncImage(url: URL(string: "https://img.youtube.com/vi/\(id)/hqdefault.jpg")) {
-                    $0.resizable().scaledToFill()
-                } placeholder: {
-                    Color.black
-                }
-                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            // Color.black takes the proposed size and the still hangs off it as
+            // an overlay — an aspectRatio(.fill) reports its oversized frame up
+            // the layout, which would push the caption plate off the card.
+            Color.black
+                .overlay { still.aspectRatio(16.0 / 9.0, contentMode: .fill) }
                 .clipped()
-                Image(systemName: "play.fill")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 58, height: 58)
-                    .background(.black.opacity(0.55), in: SwiftUI.Circle())
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
+                .overlay {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 58, height: 58)
+                        .background(.black.opacity(0.55), in: SwiftUI.Circle())
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// The thumbnail. hqdefault, because it's the one size every upload has:
+    /// maxresdefault 404s for plenty of videos and img.youtube.com answers a
+    /// 404 with a grey placeholder *image*, which AsyncImage reports as a
+    /// success — so a "prefer maxres, fall back" ladder silently shows grey.
+    /// It's 4:3 with baked black bars; scaledToFill crops those away.
+    private var still: some View {
+        AsyncImage(url: URL(string: "https://img.youtube.com/vi/\(id)/hqdefault.jpg")) {
+            $0.resizable().scaledToFill()
+        } placeholder: {
+            Color.black
+        }
     }
 
     private var controlBar: some View {

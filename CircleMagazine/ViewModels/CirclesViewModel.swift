@@ -14,7 +14,12 @@ final class CirclesViewModel {
     private let store: IssueStore
     let me: User
 
-    enum LoadState { case loading, loaded([CircleSummary]), failed(String) }
+    enum LoadState {
+      case loading,
+           loaded([CircleSummary]),
+           failed(String)
+    }
+
     private(set) var state: LoadState = .loading
 
     init(db: DatabaseService, store: IssueStore, me: User) {

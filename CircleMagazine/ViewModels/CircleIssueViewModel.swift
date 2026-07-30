@@ -34,7 +34,8 @@ final class IssueViewModel {
   /// built before its first fetch shows the spinner, not the wrong phase.
   var state: IssueLoadState { forcedCompose ? .composing : store.state(for: circleId) }
 
-  /// The live issue's id once loaded — nil while loading/failed. Compose needs it.
+  /// The loaded edition's id — nil while loading, failed, or composing. This is
+  /// what's being *read*; it is not where submissions go (see `composeVM`).
   var liveIssueId: UUID? {
     if case .loaded(let magazine) = state { return magazine.issue.id }
     return nil
@@ -52,6 +53,29 @@ final class IssueViewModel {
     await refresh()
   }
 
+  /// The page whose reaction is uploading, so its card can show it's working.
+  private(set) var reactingPageId: UUID?
+
+  /// React to a page with a photo, replacing your previous one if you had it.
+  /// The card hands over a page id and bytes — the circle and the viewer are
+  /// this VM's business, so a card can't react as somebody else.
+  ///
+  /// ponytail: a full edition refetch per reaction, same as `delete`. Keeps one
+  /// source of truth; swap in an optimistic overlay if it ever feels slow.
+  func react(pageId: UUID, jpeg: Data) async {
+    reactingPageId = pageId
+    defer { reactingPageId = nil }
+    _ = try? await store.db.upsertReaction(pageId: pageId, circleId: circleId,
+                                           userId: me.id, jpeg: jpeg)
+    await refresh()
+  }
+
+  /// Take your reaction back.
+  func unreact(pageId: UUID) async {
+    try? await store.db.deleteReaction(pageId: pageId, userId: me.id)
+    await refresh()
+  }
+
   /// A comments VM for one of this edition's pages. Comments are their own
   /// concern (own VM), constructed here so the card stack never sees `db` or the
   /// factory — it only ever holds this IssueViewModel.
@@ -59,16 +83,18 @@ final class IssueViewModel {
     CommentsModel(db: store.db, pageId: pageId, me: me)
   }
 
-  /// A fresh signed URL for a re-hosted reel poster. Command, not exposure —
-  /// the card asks the VM, the VM asks the Model.
-  func posterURL(path: String) async -> URL? {
-    await store.db.posterSignedURL(path: path)
+  /// A fresh signed URL for a stored image — a member's photo or a re-hosted
+  /// reel cover. Command, not exposure: the card asks the VM, the VM asks the
+  /// Model.
+  func signedURL(path: String) async -> URL? {
+    await store.db.signedURL(path: path)
   }
 
-  /// A compose VM for posting into this circle's live edition. Seeds it with the
-  /// loaded issue id when we have it; otherwise compose asks the DB via circleId.
+  /// A compose VM for submitting into this circle. Only the circle is handed
+  /// over — which edition a submission joins is the DB's call, and it's always
+  /// the open draft, never the edition this VM currently has loaded.
   func composeVM() -> ComposeModel {
-    ComposeModel(db: store.db, issueId: liveIssueId, circleId: circleId, author: me)
+    ComposeModel(db: store.db, circleId: circleId, author: me)
   }
 }
 

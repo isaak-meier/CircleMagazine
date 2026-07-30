@@ -240,10 +240,12 @@ struct ChatViewModelTests {
 
     // MARK: - Thread rows: events
 
-    @Test func submissionEventsAreMarkedEventsAndCarryNoText() {
+    /// The event's wording comes from the VM, not the view — the view only
+    /// composes "<name> <text>".
+    @Test func submissionEventsAreMarkedEventsAndCarryTheirWording() {
         let row = vm([submission(sawyer)]).rows[0]
         #expect(row.isEvent)
-        #expect(row.text == "")
+        #expect(row.text == "submitted a piece to this week's edition")
         #expect(row.authorName == "Sawyer")   // the view says "Sawyer submitted a piece…"
     }
 
@@ -361,5 +363,129 @@ struct ChatViewModelTests {
         vm.draft = "\nline one\nline two\n"
         vm.send()
         #expect(vm.rows[0].text == "line one\nline two")
+    }
+
+    // MARK: - Submissions in the thread
+
+    /// A DB whose draft submissions are whatever the test says.
+    private final class SubmissionSpy: DatabaseService, @unchecked Sendable {
+        var stubbed: [Submission] = []
+        var shouldThrow = false
+        struct Boom: Error {}
+
+        override func draftSubmissions(circleId: UUID) async throws -> [Submission] {
+            if shouldThrow { throw Boom() }
+            return stubbed
+        }
+    }
+
+    private func spyVM(_ spy: SubmissionSpy, seed: [ChatMessage] = []) -> ChatViewModel {
+        ChatViewModel(db: spy, summary: summary([dave, arnell, sawyer, me], createdBy: arnell.id),
+                      me: me, seed: seed)
+    }
+
+    /// Fixture times, all in the recent past and in ascending order. Relative to
+    /// now rather than pinned to a calendar date, because `send()` stamps `.now`
+    /// — a fixed date would sort either side of it depending on when the suite
+    /// runs.
+    private func at(_ minute: Int) -> Date {
+        Date.now.addingTimeInterval(TimeInterval(minute * 60) - 3600)
+    }
+
+    @Test func submissionsAppearAsEventRows() async {
+        let spy = SubmissionSpy()
+        spy.stubbed = [Submission(authorId: dave.id, at: at(0))]
+        let vm = spyVM(spy)
+        await vm.appear()
+        #expect(vm.rows.count == 1)
+        #expect(vm.rows[0].isEvent)
+        #expect(vm.rows[0].authorName == "Dave")
+        #expect(vm.rows[0].text == "submitted a piece to this week's edition")
+    }
+
+    /// Submissions interleave with chatter by time, rather than clumping at
+    /// either end — the event reads as part of the conversation.
+    @Test func submissionsInterleaveWithMessagesByTime() async {
+        let spy = SubmissionSpy()
+        spy.stubbed = [Submission(authorId: sawyer.id, at: at(5))]
+        let vm = spyVM(spy, seed: [text(dave, "before", at: at(0)),
+                                   text(arnell, "after", at: at(10))])
+        await vm.appear()
+        #expect(vm.rows.map(\.isEvent) == [false, true, false])
+        #expect(vm.rows.map(\.text) == ["before",
+                                        "submitted a piece to this week's edition",
+                                        "after"])
+    }
+
+    /// Your own submission reads the same as anyone else's — the compose phase
+    /// announces the act, never the content.
+    @Test func myOwnSubmissionIsAnEventNotAMessage() async {
+        let spy = SubmissionSpy()
+        spy.stubbed = [Submission(authorId: me.id, at: at(0))]
+        let vm = spyVM(spy)
+        await vm.appear()
+        #expect(vm.rows[0].isEvent)
+        #expect(vm.rows[0].text == "submitted a piece to this week's edition")
+    }
+
+    /// Two submissions from one author are two rows — the thread reports acts,
+    /// not a per-person flag.
+    @Test func eachSubmissionIsItsOwnRow() async {
+        let spy = SubmissionSpy()
+        spy.stubbed = [Submission(authorId: dave.id, at: at(0)),
+                       Submission(authorId: dave.id, at: at(3))]
+        let vm = spyVM(spy)
+        await vm.appear()
+        #expect(vm.rows.count == 2)
+        #expect(vm.rows.map(\.isEvent) == [true, true])
+    }
+
+    /// Someone who submitted and then left has no member row to render from, so
+    /// their event drops rather than showing a nameless bubble.
+    @Test func aSubmitterWhoIsNoLongerAMemberIsSkipped() async {
+        let spy = SubmissionSpy()
+        spy.stubbed = [Submission(authorId: UUID(), at: at(0)),
+                       Submission(authorId: dave.id, at: at(1))]
+        let vm = spyVM(spy)
+        await vm.appear()
+        #expect(vm.rows.count == 1)
+        #expect(vm.rows[0].authorName == "Dave")
+    }
+
+    /// A refetch replaces the submissions rather than appending them — appear()
+    /// runs again on every return to the screen.
+    @Test func reloadingDoesNotDuplicateSubmissions() async {
+        let spy = SubmissionSpy()
+        spy.stubbed = [Submission(authorId: dave.id, at: at(0))]
+        let vm = spyVM(spy)
+        await vm.appear()
+        await vm.appear()
+        #expect(vm.rows.count == 1)
+    }
+
+    /// A failed fetch keeps the thread as-is — a flaky network shouldn't erase
+    /// events that are already on screen.
+    @Test func aFailedFetchLeavesTheThreadAlone() async {
+        let spy = SubmissionSpy()
+        spy.stubbed = [Submission(authorId: dave.id, at: at(0))]
+        let vm = spyVM(spy, seed: [text(arnell, "hi", at: at(1))])
+        await vm.appear()
+        #expect(vm.rows.count == 2)
+
+        spy.shouldThrow = true
+        await vm.appear()
+        #expect(vm.rows.count == 2)   // still both
+    }
+
+    /// Sending a message alongside submissions doesn't disturb them.
+    @Test func sendingKeepsSubmissionsInThread() async {
+        let spy = SubmissionSpy()
+        spy.stubbed = [Submission(authorId: dave.id, at: at(0))]
+        let vm = spyVM(spy)
+        await vm.appear()
+        vm.draft = "nice one"
+        vm.send()
+        #expect(vm.rows.count == 2)
+        #expect(vm.rows.map(\.isEvent) == [true, false])
     }
 }

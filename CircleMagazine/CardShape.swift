@@ -9,10 +9,20 @@
 
 import Foundation
 
-enum CardShape: String, Codable {
+enum CardShape: String, Codable, CaseIterable {
     case wide   = "16:9"
     case tall   = "9:16"
     case square = "1:1"
+
+    /// Shown in compose's shape picker — a photo has no link to infer from, so
+    /// the author picks.
+    var displayName: String {
+        switch self {
+        case .wide:   "Wide"
+        case .tall:   "Tall"
+        case .square: "Square"
+        }
+    }
 
     var ratio: CGFloat {
         switch self {

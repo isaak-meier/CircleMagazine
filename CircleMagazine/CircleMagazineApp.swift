@@ -25,7 +25,11 @@ struct CircleMagazineApp: App {
         WindowGroup {
             switch account.authState {
             case .loading:   ProgressView()
-            case .signedOut: WelcomeView(account: account)
+            // Every sign-out passes through here, so this is the one place that
+            // reliably sits between two sessions — clear the cache so the next
+            // sign-in warms from scratch. (Fires on a signed-out cold start too,
+            // where the store is already empty and it costs nothing.)
+            case .signedOut: WelcomeView(account: account).onAppear { factory.reset() }
             case .signedIn(let user): RootTabView(factory: factory, account: account, me: user)
             }
         }

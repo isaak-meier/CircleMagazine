@@ -32,7 +32,7 @@ struct CardFeedView: View {
                     Text("Retrieving latest issue...")
                     ProgressView()
                     Spacer()
-                case .loaded(let magazine) where magazine.cards.isEmpty:
+                case .loaded(let magazine) where magazine.cards().isEmpty:
                     emptyEdition
                 case .loaded(let magazine):
                     viewport(for: magazine)
@@ -98,18 +98,21 @@ struct CardFeedView: View {
     private func viewport(for magazine: Magazine) -> some View {
         let peek = Style.Space.xxl              // lip of the next card at the bottom
         let topGap = Style.Space.sm             // small space under the contributors row
+        // Built with the viewer, so each card knows which reaction is its own.
+        let cards = magazine.cards(meId: me?.id)
         // Nil until the first scroll — treat the top card as active so it
         // autoplays on open.
-        let activeId = visibleCardId ?? magazine.cards.first?.id
+        let activeId = visibleCardId ?? cards.first?.id
         return ScrollView(.vertical) {
             LazyVStack(spacing: Style.Space.sm) {
-                ForEach(magazine.cards) { cardViewModel in
+                ForEach(cards) { cardViewModel in
                     let card = CardView(viewModel: cardViewModel, issue: vm, me: me,
                                         isActive: cardViewModel.id == activeId,
                                         onDelete: { await vm.delete(pageId: cardViewModel.id) })
-                    // A reel card sizes to its cropped poster; every other card
-                    // fills the viewport height.
-                    if cardViewModel.isTallInsta {
+                    // A card sized by its media takes only the height it needs,
+                    // so a 16:9 video and its plate come in at about half the
+                    // viewport and two land on screen together.
+                    if cardViewModel.hugsItsMedia {
                         card.feedCardWidth()
                     } else {
                         card.feedCardFrame()

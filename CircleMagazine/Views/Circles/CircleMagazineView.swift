@@ -29,7 +29,12 @@ struct CircleMagazineView: View {
             .sheet(isPresented: $composing) {
                 ComposeView(model: vm.issue.composeVM()) {
                     composing = false
-                    await vm.issue.refresh()   // show the new post
+                    // Both, because a submission lands in the draft while the
+                    // screen may be showing either phase: the chat gains an
+                    // event row, and the edition reloads in case this post is
+                    // what opened it.
+                    await vm.chat.appear()
+                    await vm.issue.refresh()
                 }
             }
     }

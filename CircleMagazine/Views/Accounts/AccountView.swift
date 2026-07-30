@@ -10,8 +10,13 @@ import SwiftUI
 
 struct AccountView: View {
     let account: AccountManager
+    /// Called when a developer switch changes what an edition fetch would
+    /// return, so the cached editions can be dropped. A closure, not the store —
+    /// this screen has no business holding a service.
+    var onEditionSourceChanged: () -> Void = {}
 
     @AppStorage(IssueViewModel.forceComposeKey) private var forceCompose = false
+    @AppStorage(DatabaseService.showDraftKey) private var showDraft = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,8 +68,18 @@ struct AccountView: View {
                 .foregroundStyle(Style.ink)
             Text("Shows the circle chat instead of the edition.")
                 .font(Style.stamp).foregroundStyle(Style.meta)
+
+            Toggle("Read the open draft", isOn: $showDraft)
+                .font(Style.body)
+                .foregroundStyle(Style.ink)
+                .padding(.top, Style.Space.sm)
+            Text("Opens this week's unpublished edition, so a post is readable the moment you make it.")
+                .font(Style.stamp).foregroundStyle(Style.meta)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The cached editions were fetched under the old setting, so drop them
+        // and let the next circle you open refetch under the new one.
+        .onChange(of: showDraft) { _, _ in onEditionSourceChanged() }
     }
     #endif
 

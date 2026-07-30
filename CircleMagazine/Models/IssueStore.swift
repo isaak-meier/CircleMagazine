@@ -43,11 +43,22 @@ final class IssueStore {
   func refresh(circleId: UUID) async {
     do {
       // nil = nothing live = the compose phase. Only a thrown error is a failure.
-      if let magazine = try await db.fetchCurrentIssue(circleId: circleId) {
+      let fetched = try await db.fetchCurrentIssue(circleId: circleId)
+      // Signing out cancels the warm that's mid-flight, but its already-issued
+      // fetches still return — writing them here would repopulate the cache
+      // straight after `invalidateAll` cleared it, leaking the old account's
+      // editions into the next session.
+      if Task.isCancelled { return }
+      if let magazine = fetched {
         issueLoadStates[circleId] = .loaded(magazine)
       } else {
         issueLoadStates[circleId] = .composing
       }
+    } catch is CancellationError {
+      // Whoever asked went away — that's not a failed edition. Clobbering the
+      // state here put the whole circle on the error screen when a card's task
+      // was cancelled mid-refresh.
+      return
     } catch {
       issueLoadStates[circleId] = .failedToLoad(error: error.localizedDescription)
     }
@@ -56,6 +67,14 @@ final class IssueStore {
   /// Cheap staleness check: full-fetch if nothing's cached, refresh only when a
   /// new issue went live, otherwise spend nothing.
   func refreshIfNeeded(circleId: UUID) async {
+    // Showing the draft: the staleness check below compares against the LIVE
+    // issue id, which is a different edition entirely, so it would refetch every
+    // time anyway. Skip straight to the refetch — and it's what you want while
+    // testing, since the draft changes under you as you post into it.
+    guard !DatabaseService.isShowingDraft else {
+      await refresh(circleId: circleId)
+      return
+    }
     guard case .loaded(let cached) = issueLoadStates[circleId] else {
       await load(circleId: circleId)  // nothing cached yet → first load
       return

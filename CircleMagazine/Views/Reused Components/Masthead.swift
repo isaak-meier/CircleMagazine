@@ -12,7 +12,10 @@ import SwiftUI
 struct Masthead: View {
     let title: String
     var stamp: String? = nil
-    var eyebrow: String = "THIS SUNDAY'S EDITION"
+    /// "week", not "Sunday": the stamp beside it is the edition's own date — a
+    /// Saturday — while it opens on the Sunday after. Naming a weekday here
+    /// contradicts the date directly under it.
+    var eyebrow: String = "THIS WEEK'S EDITION"
     /// Optional accessories flanking the wordmark — e.g. a back chevron on the
     /// left, members/compose controls on the right. Both nil ⇒ plain masthead.
     var leading: AnyView? = nil

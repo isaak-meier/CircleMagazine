@@ -417,6 +417,13 @@ private struct CircleBubble: View {
                                       dy: value.translation.height / scale))
                 }
         )
+        // One element, not two loose labels: the bubble is a button that opens
+        // the circle. Also what makes it reachable to UI automation, since a
+        // bare tap gesture isn't.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(summary.name), \(summary.members.count) members")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { onTap(CGPoint(x: center.x * scale, y: center.y * scale)) }
         .position(x: center.x * scale, y: center.y * scale)
         .offset(x: drag.width, y: drag.height)
         .zIndex(slot.diameter)  // bigger bubbles float above smaller neighbors
@@ -532,47 +539,6 @@ private struct CircleFormSheet: View {
                 self.error = "\(errorPrefix) — \(error.localizedDescription)"
             }
             submitting = false
-        }
-    }
-}
-
-/// One box per character of a fixed-length code. A hidden text field holds the
-/// real input (so the system keyboard, paste, and deletion all just work); the
-/// boxes only render it, with the cursor's box outlined in ink.
-private struct CodeField: View {
-    let length: Int
-    @Binding var input: String
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        ZStack {
-            TextField("", text: $input)
-                .keyboardType(.asciiCapable)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-                .focused($focused)
-                .opacity(0)
-                .frame(width: 1, height: 1)
-            HStack(spacing: Style.Space.sm) {
-                ForEach(0..<length, id: \.self) { i in
-                    let chars = Array(input)
-                    Text(i < chars.count ? String(chars[i]) : " ")
-                        .font(.system(size: 22, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Style.ink)
-                        .frame(width: 44, height: 54)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Style.paper))
-                        .overlay(RoundedRectangle(cornerRadius: 10)
-                            .stroke(focused && i == chars.count ? Style.ink : Style.rule,
-                                    lineWidth: focused && i == chars.count ? 1.5 : 1))
-                }
-            }
-            .contentShape(Rectangle())
-            .onTapGesture { focused = true }
-        }
-        .onAppear { focused = true }
-        .onChange(of: input) { _, new in
-            let cleaned = String(new.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(length))
-            if cleaned != new { input = cleaned }
         }
     }
 }
