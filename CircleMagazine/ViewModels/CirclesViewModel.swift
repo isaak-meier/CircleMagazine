@@ -37,6 +37,7 @@ final class CirclesViewModel {
             let circles = try await db.fetchCircles(memberOf: me.id)
             state = .loaded(circles)
             await store.warm(circleIds: circles.map(\.id))
+            await scheduleEditionNudges()
         } catch {
             state = .failed("Couldn't load your circles — \(error.localizedDescription)")
         }
@@ -49,6 +50,7 @@ final class CirclesViewModel {
         if case .loaded(let circles) = state {
             state = .loaded(circles + [CircleSummary(circle: circle, members: [me])])
         }
+        await scheduleEditionNudges()
     }
 
     /// Joins via invite code and grows the circle's bubble in place. Throws so
@@ -58,6 +60,18 @@ final class CirclesViewModel {
         if case .loaded(let circles) = state, !circles.contains(where: { $0.id == summary.id }) {
             state = .loaded(circles + [summary])
         }
+        await scheduleEditionNudges()
+    }
+
+    /// Line up "this week's edition is out" for every circle, on this device.
+    ///
+    /// Here because this is what owns the circle list, and it runs after create
+    /// and join as well as load — so the permission prompt lands on someone who
+    /// has just made or joined a circle and knows what they'd be notified about,
+    /// rather than at launch before the app has shown them anything.
+    private func scheduleEditionNudges() async {
+        guard case .loaded(let circles) = state else { return }
+        await EditionNotifications.reschedule(for: circles.map { (id: $0.id, name: $0.name) })
     }
 }
 

@@ -75,6 +75,14 @@ struct AccountView: View {
                 .padding(.top, Style.Space.sm)
             Text("Opens this week's unpublished edition, so a post is readable the moment you make it.")
                 .font(Style.stamp).foregroundStyle(Style.meta)
+
+            Button("Send the edition nudge") {
+                Task { await EditionNotifications.fireTestNotification() }
+            }
+            .buttonStyle(.link)
+            .padding(.top, Style.Space.sm)
+            Text("Fires the real Sunday notification in 5 seconds — background the app to see the banner.")
+                .font(Style.stamp).foregroundStyle(Style.meta)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // The cached editions were fetched under the old setting, so drop them

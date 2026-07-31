@@ -21,8 +21,6 @@ struct ComposeView: View {
     /// stays off the main thread until the author actually picks something.
     @State private var pickedItem: PhotosPickerItem?
     @State private var loadingPhoto = false
-    /// The confirmation's measured height, so the sheet can shrink to it.
-    @State private var confirmationHeight: CGFloat = 0
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     /// Called when the post lands, so the feed can refresh to include it.
@@ -56,7 +54,7 @@ struct ComposeView: View {
             }
         }
         .background(Style.paper)
-        .modifier(SheetHeight(contentHeight: model.phase == .posted ? confirmationHeight : nil))
+        .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
         // Decoding happens here rather than in the model: PhotosPickerItem is a
         // SwiftUI type, so keeping it out of ComposeModel is what lets the model
@@ -99,33 +97,6 @@ struct ComposeView: View {
 
     private var grabber: some View {
         Capsule().fill(Style.rule).frame(width: 36, height: 4).padding(.top, 10)
-    }
-
-    /// The confirmation is a short block of text, so the sheet shrinks to the
-    /// height that block actually measures instead of stranding it in the middle
-    /// of a full-height page. The editing steps stay `.large`: they scroll and
-    /// raise a keyboard, which a self-sizing sheet would resize underneath.
-    ///
-    /// A measured detent rather than `presentationSizing(.fitted)`: fitted keeps
-    /// the sheet's original bounds when the phase changes mid-presentation, so
-    /// the page stayed full height and merely went blank behind the text.
-    private struct SheetHeight: ViewModifier {
-        let contentHeight: CGFloat?
-        func body(content: Content) -> some View {
-            if let contentHeight, contentHeight > 0 {
-                content.presentationDetents([.height(contentHeight)])
-            } else {
-                content.presentationDetents([.large])
-            }
-        }
-    }
-
-    /// Reports the confirmation's laid-out height up to the sheet.
-    private struct HeightKey: PreferenceKey {
-        static var defaultValue: CGFloat { 0 }
-        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-            value = max(value, nextValue())
-        }
     }
 
     // MARK: Header
@@ -586,49 +557,62 @@ struct ComposeView: View {
 
     // MARK: Step 3 — confirmation
 
+    /// A full-height page rather than a sheet that shrinks to its text: the
+    /// sheet keeps the one `.large` detent it was presented at, so posting
+    /// swaps the content without the sheet resizing under the author's hand.
+    /// Ruled eyebrow up top, the mark centered, the action on the baseline —
+    /// the same masthead/pill vocabulary as the rest of the app.
     private var confirmation: some View {
         VStack(spacing: 0) {
             grabber
-            // no keyboard and no scrolling here, so one measure settles it
-            VStack(spacing: 0) {
-                SwiftUI.Circle().fill(Style.ink).frame(width: 58, height: 58)
-                    .overlay(Image(systemName: "checkmark").font(.system(size: 24, weight: .bold)).foregroundStyle(Style.paper))
-                Text("You're in the edition")
-                    .font(.system(size: 25, weight: .bold, design: .serif)).padding(.top, 22)
-                // Names the day, not "this Sunday" — an author who posts on
-                // Tuesday and checks Wednesday needs to know nothing is wrong.
-                (Text("Your post joins the ").foregroundStyle(Style.meta)
-                 + Text("\(model.editionName) edition").foregroundStyle(Style.ink).bold()
-                 + Text(". You'll see it \(model.opensOn), when the issue opens.")
-                    .foregroundStyle(Style.meta))
-                    .font(Style.body).multilineTextAlignment(.center)
-                    .padding(.top, 10).frame(maxWidth: 280)
+            ruledEyebrow("SUBMITTED").padding(.top, 22)
 
-                // Only links get the thumbnail recap; a photo's confirmation
-                // stands on its own rather than re-showing what was just picked.
-                if let resolved = model.resolved { scheduledRow(resolved).padding(.top, 26) }
+            Spacer(minLength: Style.Space.xl)
 
-                Button { Task { await onPosted(); dismiss() } } label: {
-                    // Dismisses to the circle — which during compose is the
-                    // chat, not an edition. Saying "view the edition" would
-                    // promise the very thing the sentence above defers.
-                    Text("Back to the circle")
-                        .font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Style.ink)
-                        .overlay(alignment: .bottom) { Rectangle().fill(Style.ink).frame(height: 1.5).offset(y: 3) }
-                }
-                .padding(.top, 24)
+            SwiftUI.Circle().fill(Style.ink).frame(width: 58, height: 58)
+                .overlay(Image(systemName: "checkmark")
+                    .font(.system(size: 24, weight: .bold)).foregroundStyle(Style.paper))
+            Text("You're in the edition")
+                .font(.system(size: 25, weight: .bold, design: .serif))
+                .foregroundStyle(Style.ink)
+                .padding(.top, Style.Space.xl)
+            // Names the day, not "this Sunday" — an author who posts on
+            // Tuesday and checks Wednesday needs to know nothing is wrong.
+            (Text("Your post joins the ").foregroundStyle(Style.meta)
+             + Text("\(model.editionName) edition").foregroundStyle(Style.ink).bold()
+             + Text(". You'll see it \(model.opensOn), when the issue opens.")
+                .foregroundStyle(Style.meta))
+                .font(Style.body).multilineTextAlignment(.center)
+                .padding(.top, Style.Space.md).frame(maxWidth: 280)
+
+            // Only links get the thumbnail recap; a photo's confirmation
+            // stands on its own rather than re-showing what was just picked.
+            if let resolved = model.resolved {
+                scheduledRow(resolved).padding(.top, Style.Space.xxl).frame(maxWidth: 320)
             }
-            // No greedy frame: the sheet sizes to this content, so stretching
-            // to fill would defeat that and re-create the empty page.
-            .padding(.top, 28)
-            .padding(.horizontal, 40).padding(.bottom, 40)
-        }
-        .background {
-            GeometryReader { geo in
-                Color.clear.preference(key: HeightKey.self, value: geo.size.height)
+
+            Spacer(minLength: Style.Space.xl)
+
+            // Dismisses to the circle — which during compose is the chat, not
+            // an edition. Saying "view the edition" would promise the very
+            // thing the sentence above defers.
+            CirclePillButton(title: "Back to the circle", filled: true, height: 50) {
+                Task { await onPosted(); dismiss() }
             }
         }
-        .onPreferenceChange(HeightKey.self) { confirmationHeight = $0 }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, Style.Space.xxl)
+        .padding(.bottom, 40)
+    }
+
+    /// Small-caps label with a hairline running out to both margins — the
+    /// masthead's rule, at section scale.
+    private func ruledEyebrow(_ text: String) -> some View {
+        HStack(spacing: Style.Space.md) {
+            Rectangle().fill(Style.rule).frame(height: 1)
+            Text(text).font(Style.eyebrow).tracking(1.8).foregroundStyle(faint)
+            Rectangle().fill(Style.rule).frame(height: 1)
+        }
     }
 
     private func scheduledRow(_ resolved: ComposeModel.Resolved) -> some View {

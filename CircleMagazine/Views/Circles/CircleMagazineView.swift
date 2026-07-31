@@ -26,16 +26,18 @@ struct CircleMagazineView: View {
             .sheet(isPresented: $showMembers) {
                 CircleMembersView(vm: vm, tone: tone) { showMembers = false }
             }
+            // Refresh on dismiss, not inside the sheet's own callback: swiping
+            // the sheet away is as much a way out as the confirmation's button,
+            // and a post that only shows up when you leave the "right" way
+            // looks like it didn't save.
+            //
+            // Both reloads, because a submission lands in the draft while the
+            // screen may be showing either phase: the chat gains an event row,
+            // and the edition reloads in case this post is what opened it.
             .sheet(isPresented: $composing) {
-                ComposeView(model: vm.issue.composeVM()) {
-                    composing = false
-                    // Both, because a submission lands in the draft while the
-                    // screen may be showing either phase: the chat gains an
-                    // event row, and the edition reloads in case this post is
-                    // what opened it.
-                    await vm.chat.appear()
-                    await vm.issue.refresh()
-                }
+                Task { await vm.chat.appear(); await vm.issue.refresh() }
+            } content: {
+                ComposeView(model: vm.issue.composeVM()) { composing = false }
             }
     }
 

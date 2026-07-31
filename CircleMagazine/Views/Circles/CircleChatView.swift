@@ -30,7 +30,6 @@ struct CircleChatView: View {
             header
             editionStrip
             thread
-            inputBar
         }
         .background(Style.chrome)
         .task { await vm.appear() }
@@ -239,31 +238,9 @@ struct CircleChatView: View {
                                     bottomTrailing: 18, topTrailing: 18)
     }
 
-    // MARK: Input bar
-
-    private var inputBar: some View {
-        HStack(spacing: Style.Space.sm) {
-            TextField("Message \(vm.circleName)", text: $vm.draft)
-                .font(.system(size: 13.5))
-                .padding(.horizontal, Style.Space.lg).padding(.vertical, 10)
-                .background(Capsule().fill(Style.paper))
-                .overlay(Capsule().stroke(Style.rule, lineWidth: 1))
-                .onSubmit(vm.send)
-            Button(action: vm.send) {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Style.paper)
-                    .frame(width: 32, height: 32)
-                    .background(SwiftUI.Circle().fill(Style.ink))
-            }
-            .disabled(!vm.canSend)
-            .opacity(vm.canSend ? 1 : 0.35)
-        }
-        .padding(.horizontal, Style.Space.md)
-        .padding(.top, 9)
-        .background(Style.chrome)
-        .overlay(alignment: .top) { Rectangle().fill(Style.rule).frame(height: 1) }
-    }
+    // No input bar: a sent message only lives in memory (there's no messages
+    // table yet), so it vanishes on reload. The thread shows submissions until
+    // chat can actually persist — ChatViewModel keeps draft/send ready for it.
 
     // MARK: Small helpers
 

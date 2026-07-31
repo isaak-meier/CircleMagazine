@@ -90,17 +90,25 @@ final class BubblePhysics {
     private(set) var bounds: CGSize = .zero
     private var lastTick: Date?
 
+    /// The bubble under the finger: pinned to its stretched position (physics
+    /// paused for it) until release flings it back through its anchor.
+    private var held: (index: Int, anchor: CGPoint, stretch: CGVector)?
+
+    /// Idle drift speed a flung bubble decays back down to.
+    private static let driftSpeed: CGFloat = 30
+
     /// (Re)seed one body per circle at its collage slot, drifting in a random
     /// direction. No-op while the count is unchanged.
     func sync(count: Int) {
         guard bodies.count != count else { return }
+        held = nil
         bounds = CGSize(width: CircleBubbleLayout.designWidth,
                         height: CircleBubbleLayout.fieldHeight(count: count))
         bodies = (0..<count).map { i in
             let slot = CircleBubbleLayout.slot(i)
             let r = slot.diameter / 2
             let angle = CGFloat.random(in: 0..<(2 * .pi))
-            let speed = CGFloat.random(in: 8...16)
+            let speed = CGFloat.random(in: 26...44)
             return Body(pos: CGPoint(x: slot.x + r, y: slot.y + r),
                         vel: CGVector(dx: cos(angle) * speed, dy: sin(angle) * speed),
                         radius: r)
@@ -124,14 +132,26 @@ final class BubblePhysics {
 
     func step(dt: CGFloat) {
         guard dt > 0 else { return }
-        for i in bodies.indices {
+        for i in bodies.indices where i != held?.index {
+            damp(i, dt: dt)
             bodies[i].pos.x += bodies[i].vel.dx * dt
             bodies[i].pos.y += bodies[i].vel.dy * dt
         }
         for i in bodies.indices {
             for j in bodies.indices where j > i { collide(i, j) }
         }
-        for i in bodies.indices { bounceOffWalls(i) }
+        for i in bodies.indices where i != held?.index { bounceOffWalls(i) }
+        pinHeld()  // collisions may have shoved it — the finger wins
+    }
+
+    /// Friction: a flung bubble bleeds speed until it's back to a lazy drift.
+    /// Never below driftSpeed, so the field never goes still.
+    private func damp(_ i: Int, dt: CGFloat) {
+        let v = bodies[i].vel
+        let speed = sqrt(v.dx * v.dx + v.dy * v.dy)
+        guard speed > Self.driftSpeed else { return }
+        let f = max(Self.driftSpeed / speed, exp(-0.45 * dt))
+        bodies[i].vel = CGVector(dx: v.dx * f, dy: v.dy * f)
     }
 
     /// Elastic circle/circle collision: push the pair out of overlap, then do
@@ -164,15 +184,44 @@ final class BubblePhysics {
         bodies[i] = a; bodies[j] = b
     }
 
-    /// Slingshot release: the bubble was dragged by `pull` (design-space), so
-    /// it sits at the stretched position — launch it the opposite way with force
-    /// equal to the stretch, and it bounces around off the walls from there.
-    /// ponytail: `launch` is the spring constant — bump it for a springier fling.
-    func slingshot(_ index: Int, pull: CGVector, launch k: CGFloat = 6) {
+    // MARK: Rubber band
+
+    /// Finger down: anchor the bubble where it stands and stop its drift.
+    func grab(_ index: Int) {
         guard bodies.indices.contains(index) else { return }
-        bodies[index].pos.x += pull.dx
-        bodies[index].pos.y += pull.dy
-        bodies[index].vel = CGVector(dx: -pull.dx * k, dy: -pull.dy * k)
+        held = (index, bodies[index].pos, .zero)
+        bodies[index].vel = .zero
+    }
+
+    /// Finger moved by `pull` (design space) since the grab. The band resists
+    /// more the further it's stretched, so it never runs away from the finger.
+    func stretch(to pull: CGVector) {
+        guard var h = held else { return }
+        h.stretch = CGVector(dx: Self.rubberBand(pull.dx), dy: Self.rubberBand(pull.dy))
+        held = h
+        pinHeld()
+    }
+
+    /// Let go: the band snaps the bubble back through its anchor, and friction
+    /// bleeds the fling off into the drift.
+    /// ponytail: `launch` is the band's stiffness — bump it for a harder snap.
+    func release(launch k: CGFloat = 7) {
+        guard let h = held else { return }
+        held = nil
+        bodies[h.index].vel = CGVector(dx: -h.stretch.dx * k, dy: -h.stretch.dy * k)
+    }
+
+    private func pinHeld() {
+        guard let h = held, bodies.indices.contains(h.index) else { return }
+        bodies[h.index].pos = CGPoint(x: h.anchor.x + h.stretch.dx, y: h.anchor.y + h.stretch.dy)
+        bodies[h.index].vel = .zero
+    }
+
+    /// UIScrollView's resistance curve: give approaches `limit` asymptotically,
+    /// so a long drag still feels attached to something.
+    private static func rubberBand(_ d: CGFloat, limit: CGFloat = 150) -> CGFloat {
+        let give = (1 - 1 / (abs(d) / limit + 1)) * limit
+        return d < 0 ? -give : give
     }
 
     private func bounceOffWalls(_ i: Int) {
@@ -208,6 +257,9 @@ struct CirclesView: View {
 
     @State private var sheetState: ActiveSheet?
     @State private var physics = BubblePhysics()
+
+    /// Stationary space the bubble drags are measured in.
+    private static let fieldSpace = "bubbleField"
 
     init(vm: CirclesViewModel, active: Bool = true,
          joinCode: Binding<String?> = .constant(nil),
@@ -317,11 +369,18 @@ struct CirclesView: View {
                         let slot = CircleBubbleLayout.slot(i)
                         CircleBubble(summary: summary, slot: slot, scale: scale,
                                      center: physics.bodies[i].pos,
+                                     dragSpace: Self.fieldSpace,
                                      onTap: { tapPoint in onEnter(summary, slot.tone, tapPoint) },
-                                     onLaunch: { pull in physics.slingshot(i, pull: pull) })
+                                     onGrab: { physics.grab(i) },
+                                     onStretch: { pull in physics.stretch(to: pull) },
+                                     onRelease: { physics.release() })
                     }
                 }
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                // A fixed space for the drag to measure against. Measuring in
+                // the bubble's own (moving) space feeds its motion back into
+                // the translation — that's the jitter.
+                .coordinateSpace(.named(Self.fieldSpace))
             }
         }
     }
@@ -372,16 +431,20 @@ private struct CircleBubble: View {
     let slot: CircleBubbleLayout.Slot
     let scale: CGFloat
     let center: CGPoint
+    /// Stationary space the drag measures against — see the field's note.
+    let dragSpace: String
     /// Called with the tap point in the "root" coordinate space, so the
     /// ripple into the chat radiates from the finger.
     let onTap: (CGPoint) -> Void
-    /// Slingshot release: the drag pull in design space (screen ÷ scale). The
-    /// field converts this into an opposite-direction launch on the physics body.
-    let onLaunch: (CGVector) -> Void
+    /// Rubber band, in design space (screen ÷ scale): the field owns the
+    /// bubble's position throughout, so there's nothing to snap on release.
+    let onGrab: () -> Void
+    let onStretch: (CGVector) -> Void
+    let onRelease: () -> Void
 
-    /// Live drag translation (screen space) while stretching the spring; resets
-    /// to zero on release, when the launch takes over.
-    @GestureState private var drag: CGSize = .zero
+    /// Translation at the moment the drag passed minimumDistance — subtracted
+    /// out so the band starts slack instead of jumping that first 10pt.
+    @State private var dragOrigin: CGSize?
 
     var body: some View {
         let d = slot.diameter * scale
@@ -407,14 +470,23 @@ private struct CircleBubble: View {
         .onTapGesture(coordinateSpace: .named("root")) { location in
             onTap(location)
         }
-        // Drag to stretch the spring; release to fling it the opposite way.
+        // Pull the bubble off its drift like it's on a rubber band; let go and
+        // it snaps back through where it was.
         // minimumDistance keeps small touches as taps (which open the circle).
         .gesture(
-            DragGesture(minimumDistance: 10)
-                .updating($drag) { value, state, _ in state = value.translation }
-                .onEnded { value in
-                    onLaunch(CGVector(dx: value.translation.width / scale,
-                                      dy: value.translation.height / scale))
+            DragGesture(minimumDistance: 10, coordinateSpace: .named(dragSpace))
+                .onChanged { value in
+                    let origin = dragOrigin ?? {
+                        onGrab()
+                        dragOrigin = value.translation
+                        return value.translation
+                    }()
+                    onStretch(CGVector(dx: (value.translation.width - origin.width) / scale,
+                                       dy: (value.translation.height - origin.height) / scale))
+                }
+                .onEnded { _ in
+                    dragOrigin = nil
+                    onRelease()
                 }
         )
         // One element, not two loose labels: the bubble is a button that opens
@@ -425,8 +497,7 @@ private struct CircleBubble: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { onTap(CGPoint(x: center.x * scale, y: center.y * scale)) }
         .position(x: center.x * scale, y: center.y * scale)
-        .offset(x: drag.width, y: drag.height)
-        .zIndex(slot.diameter)  // bigger bubbles float above smaller neighbors
+        .zIndex(dragOrigin != nil ? 1000 : slot.diameter)  // held bubble on top, else bigger over smaller
     }
 }
 
