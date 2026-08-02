@@ -53,14 +53,21 @@ struct CardView: View {
     var body: some View {
         VStack(spacing: 0) {
             content
-            if interactive {
-                CardFooter(card: viewModel,
-                           isReacting: issue?.reactingPageId == viewModel.id,
-                           onComment: { showComments = true },
-                           onReact: { capture = CameraPicker.canUseCamera ? .camera : .library },
-                           onRemoveReaction: { Task { await issue?.unreact(pageId: viewModel.id) } },
-                           onOpenReactions: { showingReactions = true })
-            }
+            // Always drawn, even in the compose preview, where there's nothing
+            // to act on: the footer is the only thing giving the newsprint plate
+            // a bottom margin, so a card without one sits flush against its own
+            // clipped corner. The preview is meant to be the card, so it gets
+            // the row too — just dead.
+            CardFooter(card: viewModel,
+                       isReacting: issue?.reactingPageId == viewModel.id,
+                       onComment: { showComments = true },
+                       onReact: { capture = CameraPicker.canUseCamera ? .camera : .library },
+                       onRemoveReaction: { Task { await issue?.unreact(pageId: viewModel.id) } },
+                       onOpenReactions: { showingReactions = true })
+                .allowsHitTesting(interactive)
+                // Hidden rather than merely untappable — VoiceOver offering a
+                // React button that does nothing is worse than no button.
+                .accessibilityHidden(!interactive)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Style.paper)
@@ -137,7 +144,7 @@ struct CardView: View {
         // ponytail: .first — video-only cards; switch on the full array if mixed cards appear
         switch viewModel.media.first {
         case .video(let source, let instaPoster, let handle, let focus):
-            VideoCard(source: source, cardShape: viewModel.cardShape, author: viewModel.author, caption: viewModel.caption, title: viewModel.title, captionStyle: viewModel.captionStyle, onComment: interactive ? { showComments = true } : nil, isActive: isActive, trailingAccessory: canDelete ? AnyView(cardMenu) : nil, instaPoster: instaPoster, instaHandle: handle, issue: issue, instaFocus: focus, onInstaFocusChange: onPosterFocusChange)
+            VideoCard(source: source, author: viewModel.author, caption: viewModel.caption, title: viewModel.title, isActive: isActive, trailingAccessory: canDelete ? AnyView(cardMenu) : nil, instaPoster: instaPoster, instaHandle: handle, issue: issue, instaFocus: focus, onInstaFocusChange: onPosterFocusChange)
         case .link(let preview):
             LinkCard(preview: preview, author: viewModel.author, caption: viewModel.caption,
                      issue: issue, trailingAccessory: canDelete ? AnyView(cardMenu) : nil)
@@ -215,9 +222,14 @@ private struct CardMediaRegion: View {
     }
 }
 
-/// A photo page. Fills the card like every other medium — the photo IS the
-/// page, so it takes the whole page rather than sitting on one at its own
-/// aspect ratio. Off-ratio shots crop rather than letterbox.
+/// A photo page, shown at the photo's own aspect ratio — the same deal every
+/// other medium now gets.
+///
+/// It used to be `Color.clear` filling the card with the photo `scaledToFill`
+/// on top, which crops rather than letterboxes. That only works when something
+/// has already given the card a height: `Color.clear` has none of its own. The
+/// feed does (`feedCardFrame()`), the compose preview doesn't, so a staged
+/// photo collapsed to a sliver and the crop ate it.
 private struct PhotoMedia: View {
     let ref: MediaRef
     var issue: IssueViewModel?
@@ -225,21 +237,24 @@ private struct PhotoMedia: View {
     @State private var url: URL?
 
     var body: some View {
-        Color.clear
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay {
-                AsyncImage(url: url) { $0.resizable().scaledToFill() }
-                    placeholder: { Rectangle().fill(Style.rule) }
-            }
-            .clipped()
-            // Signed URLs expire, so resolve on appear rather than once at build
-            // time — a card scrolled back to after an hour still loads.
-            .task(id: ref.id) { url = await ref.resolve(with: issue) }
+        AsyncImage(url: url) { image in
+            image.resizable().scaledToFit()
+        } placeholder: {
+            // Nothing knows the photo's shape until the bytes land, so the slot
+            // is portrait — the common camera-roll shape — and the card resizes
+            // once, when the real one arrives.
+            Rectangle().fill(Style.rule).aspectRatio(3.0 / 4.0, contentMode: .fit)
+        }
+        .frame(maxWidth: .infinity)
+        // Signed URLs expire, so resolve on appear rather than once at build
+        // time — a card scrolled back to after an hour still loads.
+        .task(id: ref.id) { url = await ref.resolve(with: issue) }
     }
 }
 
-/// A photo on its own, filling the screen. The card crops to fill, so this is
-/// the only place the whole frame is visible — which is the point of it.
+/// A photo on its own, filling the screen. The card already shows the whole
+/// frame, so this is about size rather than crop — a detail you had to squint
+/// at in the edition, at the size it was shot.
 private struct PhotoViewer: View {
     let ref: MediaRef
     var issue: IssueViewModel?

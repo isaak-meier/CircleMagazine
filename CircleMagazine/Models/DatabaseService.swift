@@ -276,7 +276,6 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
   /// the card falls back to its gradient rather than blocking the post.
   @discardableResult
   func createVideoPost(issueId: UUID, circleId: UUID, authorId: UUID, videoURL: URL, caption: String?,
-                       captionStyle: CaptionStyle, cardShape: CardShape,
                        insta: InstagramEmbed.Meta? = nil, posterFocus: Double? = nil) async throws -> Page {
     var title: String?
     if case .youtube(let id)? = VideoSource(videoURL) {
@@ -284,7 +283,7 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
     }
     let page: Page = try await supabase.from("pages")
       .insert(PageInsert(issueId: issueId, submittedBy: authorId, title: title,
-                         caption: caption, captionStyle: captionStyle, cardShape: cardShape))
+                         caption: caption, captionStyle: .newsprintKicker))
       .select().single().execute().value
 
     var posterPath: String?
@@ -362,13 +361,12 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
   /// which is decoration a card can live without — the photo IS the post.
   @discardableResult
   func createPhotoPost(issueId: UUID, circleId: UUID, authorId: UUID, jpeg: Data,
-                       caption: String?, captionStyle: CaptionStyle,
-                       cardShape: CardShape) async throws -> Page {
+                       caption: String?) async throws -> Page {
     let path = try await upload(jpeg, circleId: circleId, name: "\(UUID().uuidString).jpg")
 
     let page: Page = try await supabase.from("pages")
       .insert(PageInsert(issueId: issueId, submittedBy: authorId, title: nil,
-                         caption: caption, captionStyle: captionStyle, cardShape: cardShape))
+                         caption: caption, captionStyle: .newsprintKicker))
       .select().single().execute().value
     try await supabase.from("page_media")
       .insert(PageMediaInsert(pageId: page.id, mediaUrl: path, mediaType: "image", position: 0))
@@ -396,14 +394,11 @@ class DatabaseService {   // not final: tests subclass it to spy on writes
   @discardableResult
   func createLinkPost(issueId: UUID, circleId: UUID, authorId: UUID, url: URL,
                       meta: OpenGraph.Meta?, caption: String?,
-                      captionStyle: CaptionStyle) async throws -> Page {
+                      ) async throws -> Page {
     let page: Page = try await supabase.from("pages")
       .insert(PageInsert(issueId: issueId, submittedBy: authorId,
                          title: meta?.title ?? meta?.siteName,
-                         caption: caption, captionStyle: captionStyle,
-                         // Links size to their own card, so the shape is inert;
-                         // .wide keeps the column non-null and honest.
-                         cardShape: .wide))
+                         caption: caption, captionStyle: .newsprintKicker))
       .select().single().execute().value
 
     var imagePath: String?

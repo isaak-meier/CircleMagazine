@@ -17,6 +17,7 @@ struct AccountView: View {
 
     @AppStorage(IssueViewModel.forceComposeKey) private var forceCompose = false
     @AppStorage(DatabaseService.showDraftKey) private var showDraft = false
+    @State private var showGallery = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,7 +84,14 @@ struct AccountView: View {
             .padding(.top, Style.Space.sm)
             Text("Fires the real Sunday notification in 5 seconds — background the app to see the banner.")
                 .font(Style.stamp).foregroundStyle(Style.meta)
+
+            Button("Card gallery") { showGallery = true }
+                .buttonStyle(.link)
+                .padding(.top, Style.Space.sm)
+            Text("Every card variation and every compose step, on device, with no posts needed.")
+                .font(Style.stamp).foregroundStyle(Style.meta)
         }
+        .sheet(isPresented: $showGallery) { CardGalleryView() }
         .frame(maxWidth: .infinity, alignment: .leading)
         // The cached editions were fetched under the old setting, so drop them
         // and let the next circle you open refetch under the new one.

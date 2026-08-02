@@ -73,10 +73,7 @@ struct ComposeView: View {
               let image = UIImage(data: raw),
               let jpeg = image.jpegData(compressionQuality: 0.85),
               let url = writePreview(jpeg) else { return }
-        // Portrait shots get the tall slot, everything else the square one, so
-        // the common camera-roll photo isn't cropped by default.
-        model.stagePhoto(jpeg: jpeg, previewURL: url,
-                         shape: image.size.height > image.size.width ? .tall : .square)
+        model.stagePhoto(jpeg: jpeg, previewURL: url)
     }
 
     /// AsyncImage wants a URL, so the preview bytes go to a temp file. Named for
@@ -271,34 +268,9 @@ struct ComposeView: View {
         }
     }
 
-    // Only 1a (paper plate) ships for now; 1b–1d are marked "Soon" and disabled.
-    private var stylePicker: some View {
-        HStack(spacing: 8) {
-            ForEach(CaptionStyle.allCases) { style in
-                let comingSoon = style != .paperPlate
-                let selected = model.captionStyle == style
-                Button { if !comingSoon { model.captionStyle = style } } label: {
-                    HStack(spacing: 5) {
-                        Text(style.displayName)
-                        if comingSoon {
-                            Text("SOON").font(.system(size: 8, weight: .bold)).tracking(0.4)
-                                .padding(.horizontal, 5).padding(.vertical, 2)
-                                .background(Capsule().fill(Color(hex: 0xE3E0DB)))
-                                .foregroundStyle(Style.meta)
-                        }
-                    }
-                    .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
-                    .foregroundStyle(selected ? Style.paper : Color(hex: 0xA8A39C))
-                    .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background { if selected { Capsule().fill(Style.ink) } }
-                    .overlay { if !selected { Capsule().stroke(Style.rule, lineWidth: 1) } }
-                    .opacity(comingSoon ? 0.5 : 1)
-                }
-                .buttonStyle(.plain)
-                .disabled(comingSoon)
-            }
-        }
-    }
+    // A caption-style picker (paper plate / immersive / ink band / newsprint)
+    // was drafted here and never wired up. Newsprint is the house style now and
+    // the other three are gone, so there's nothing left to pick.
 
     // MARK: Step 2 — preview + note
 
@@ -326,8 +298,7 @@ struct ComposeView: View {
             sectionLabel("How it appears in the edition").padding(.top, 18).padding(.bottom, 11)
             CardView(viewModel: CardViewModel(
                 previewingLink: link.url, meta: link.meta, author: model.author,
-                caption: model.caption.isEmpty ? nil : model.caption,
-                captionStyle: model.captionStyle))
+                caption: model.caption.isEmpty ? nil : model.caption))
                 .allowsHitTesting(false)
 
             Spacer()
@@ -379,11 +350,8 @@ struct ComposeView: View {
             sectionLabel("How it appears in the edition").padding(.top, 18).padding(.bottom, 11)
             CardView(viewModel: CardViewModel(
                 previewingPhoto: photo.previewURL, author: model.author,
-                caption: model.caption.isEmpty ? nil : model.caption,
-                captionStyle: model.captionStyle, cardShape: photo.shape))
+                caption: model.caption.isEmpty ? nil : model.caption))
                 .allowsHitTesting(false)
-
-            shapePicker(photo.shape).padding(.top, 14)
 
             Spacer()
             noteField
@@ -416,25 +384,11 @@ struct ComposeView: View {
         .overlay(RoundedRectangle(cornerRadius: 13).stroke(Style.rule, lineWidth: 1))
     }
 
-    /// How the photo sits on the page. Seeded from the photo's own orientation,
-    /// so most authors never touch it.
-    private func shapePicker(_ current: CardShape) -> some View {
-        HStack(spacing: 8) {
-            sectionLabel("Shape")
-            ForEach(CardShape.allCases, id: \.self) { shape in
-                let selected = shape == current
-                Button { model.setPhotoShape(shape) } label: {
-                    Text(shape.displayName)
-                        .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
-                        .foregroundStyle(selected ? Style.paper : Color(hex: 0xA8A39C))
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background { if selected { Capsule().fill(Style.ink) } }
-                        .overlay { if !selected { Capsule().stroke(Style.rule, lineWidth: 1) } }
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
+    // There was a wide / tall / square picker here. A photo card renders
+    // full-bleed whatever the shape says (CardView's standardCard never reads
+    // it — only Instagram does), so the control changed nothing on screen. The
+    // column is still written, seeded from the photo's own orientation; bring
+    // the picker back the day photo cards actually lay out by shape.
 
     private var editionSpine: some View {
         HStack(spacing: 9) {
@@ -460,30 +414,28 @@ struct ComposeView: View {
                 // A reel's poster is draggable to reposition its crop; every
                 // other preview stays inert.
                 let reel = isReel(resolved)
-                let preview = CardView(viewModel: CardViewModel(
+                let vm = CardViewModel(
                     previewing: resolved.source, author: model.author,
                     title: resolved.title,
                     caption: model.caption.isEmpty ? nil : model.caption,
-                    captionStyle: model.captionStyle, cardShape: resolved.shape,
                     instaPoster: resolved.insta.map { .direct($0.posterURL) },
-                    handle: resolved.insta?.handle, focus: model.posterFocus),
+                    handle: resolved.insta?.handle, focus: model.posterFocus)
+                let preview = CardView(viewModel: vm,
                     onPosterFocusChange: reel ? { model.posterFocus = $0 } : nil)
 
-                if reel {
-                    // A reel card sizes to its (square) poster + plate, exactly
-                    // like the feed — no fixed height. The note input sits below
-                    // it, so the card is a true replica. Content sizing here is
-                    // width-driven (aspectRatio), so it doesn't hit the
+                if vm.hugsItsMedia {
+                    // Sizes to its own media + plate, exactly like the feed, so
+                    // the card is a true replica with no slack under the plate.
+                    // Width-driven (aspectRatio), so it doesn't hit the
                     // containerRelativeFrame keyboard-loop that feedCardFrame did.
-                    preview
+                    // Only a reel is touchable — dragging repositions its crop.
+                    preview.allowsHitTesting(reel)
                 } else {
-                    // Fixed height, NOT .feedCardFrame(): its containerRelativeFrame
-                    // sizing feeds back against keyboard avoidance in this sheet's
-                    // ScrollView and locks the main thread in a layout loop. The
-                    // comment field overlays the card's leftover paper area.
-                    preview
-                        .frame(height: previewHeight(resolved.shape))
-                        .allowsHitTesting(false)
+                    // A square insta post fills its card rather than sizing to
+                    // it, so it needs a height. NOT .feedCardFrame(): that
+                    // containerRelativeFrame feeds back against keyboard
+                    // avoidance in this sheet's ScrollView and locks the main
+                    // thread in a layout loop.
                 }
 
                 Spacer()
@@ -495,22 +447,11 @@ struct ComposeView: View {
             .padding(.horizontal, Style.Space.lg).padding(.top, 18)
     }
 
-    /// Card height per shape so media + plate + note fill it without a void:
-    /// wide stacks a 16:9 region and the plate, square is taller, and tall is
-    /// full-bleed media (the note overlays the media bottom there).
-    // A tall Instagram reel — the only preview whose poster we let the author
-    // reposition (posts are square, YouTube isn't croppable here).
+    /// An Instagram reel — the only preview whose poster we let the author
+    /// reposition (posts are square, YouTube isn't croppable here).
     private func isReel(_ resolved: ComposeModel.Resolved) -> Bool {
-        if case .insta = resolved.source, resolved.shape == .tall { return true }
+        if case .insta(_, let kind) = resolved.source { return kind != .post }
         return false
-    }
-
-    private func previewHeight(_ shape: CardShape) -> CGFloat {
-        switch shape {
-        case .wide:   400
-        case .square: 530
-        case .tall:   440
-        }
     }
 
     // The "Add a comment…" pill. Used inset inside a card (noteField, the

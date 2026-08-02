@@ -13,8 +13,6 @@ struct CardViewModel: Identifiable {
     let author: User?
     let title: String?
     let caption: String?
-    let captionStyle: CaptionStyle
-    let cardShape: CardShape
 
     /// Who reacted, oldest first, ready to render as faces.
     let reactions: [ReactionViewModel]
@@ -26,8 +24,6 @@ struct CardViewModel: Identifiable {
         self.author = page.author
         self.title = page.page.title
         self.caption = page.page.caption
-        self.captionStyle = page.page.captionStyle ?? .paperPlate
-        self.cardShape = page.page.cardShape ?? .tall
         self.media = page.pageMedia
             .sorted { ($0.position ?? 0) < ($1.position ?? 0) }
             .map { CardMediaViewModel($0, pageTitle: page.page.title) }
@@ -90,13 +86,17 @@ struct CardViewModel: Identifiable {
     /// a 16:9 video to a portrait card can only crop, and it crops through
     /// burned-in captions and the player's own chrome.
     var hugsItsMedia: Bool {
-        switch medium {
-        case .youtube:   true
-        case .instagram: cardShape == .tall
+        switch media.first {
+        case .video(.youtube, _, _, _): true
+        // Both Instagram kinds render square, so both hug.
+        case .video(.insta, _, _, _):   true
         // A link card is a headline and a thumbnail — stretching it to a full
         // page would be mostly empty paper.
-        case .link:      true
-        case .other:     false
+        case .link:  true
+        // A photo is shown at the shape it was shot in, same as the video
+        // above it. Filling a fixed page could only crop it.
+        case .image: true
+        default:     false
         }
     }
 
@@ -104,15 +104,12 @@ struct CardViewModel: Identifiable {
     /// insta preview, `instaPoster`/`handle` carry the freshly-scraped frame so
     /// the preview matches the feed card (no re-host round trip needed yet).
     init(previewing source: VideoSource, author: User?, title: String?, caption: String?,
-         captionStyle: CaptionStyle, cardShape: CardShape,
          instaPoster: MediaRef? = nil, handle: String? = nil, focus: Double = 0.5) {
         self.id = UUID()
         self.media = [.video(source, instaPoster, handle: handle, focus: focus)]
         self.author = author
         self.title = title
         self.caption = caption
-        self.captionStyle = captionStyle
-        self.cardShape = cardShape
         self.reactions = []   // nothing to react to until it's posted
     }
 
@@ -123,30 +120,24 @@ struct CardViewModel: Identifiable {
     /// `title` mirrors what `post()` will write to the page's title column, so
     /// what the author approves is what the edition shows.
     init(previewingLink url: URL, meta: OpenGraph.Meta?, author: User?,
-         caption: String?, captionStyle: CaptionStyle) {
+         caption: String?) {
         let preview = LinkPreview(destination: url, meta: meta)
         self.id = UUID()
         self.media = [.link(preview)]
         self.author = author
         self.title = preview.title
         self.caption = caption
-        self.captionStyle = captionStyle
-        // Links hug their own card, so the shape picker never applies.
-        self.cardShape = .wide
         self.reactions = []   // nothing to react to until it's posted
     }
 
     /// Compose live preview for a picked photo — the bytes are already on the
     /// device, so the ref is `.direct` and the preview needs no signing.
-    init(previewingPhoto url: URL, author: User?, caption: String?,
-         captionStyle: CaptionStyle, cardShape: CardShape) {
+    init(previewingPhoto url: URL, author: User?, caption: String?) {
         self.id = UUID()
         self.media = [.image(.direct(url))]
         self.author = author
         self.title = nil
         self.caption = caption
-        self.captionStyle = captionStyle
-        self.cardShape = cardShape
         self.reactions = []   // nothing to react to until it's posted
     }
 }

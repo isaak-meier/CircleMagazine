@@ -21,7 +21,6 @@ final class ComposeModel {
         let videoURL: URL
         let source: VideoSource
         let title: String?
-        let shape: CardShape
         // Instagram: the scraped cover frame + @handle, so the preview shows the
         // real card and post() can re-host without scraping again.
         var insta: InstagramEmbed.Meta? = nil
@@ -44,11 +43,9 @@ final class ComposeModel {
         let meta: OpenGraph.Meta?
     }
 
-    /// A picked photo, already encoded to the bytes that get uploaded. The
-    /// shape is the author's framing choice, same as a link card's.
+    /// A picked photo, already encoded to the bytes that get uploaded.
     struct Photo {
         let jpeg: Data
-        var shape: CardShape = .square
         /// A local URL for the preview, so the card renders the real photo
         /// without a round trip through storage.
         let previewURL: URL
@@ -56,7 +53,6 @@ final class ComposeModel {
 
     var linkText = ""
     var caption = ""
-    var captionStyle: CaptionStyle = .paperPlate
     /// Author-chosen vertical crop for a reel poster (0 top…1 bottom), set by
     /// dragging the preview. Centered until they move it.
     var posterFocus: Double = 0.5
@@ -181,8 +177,7 @@ final class ComposeModel {
             }
         case .rawFile: break
         }
-        draft = .link(Resolved(videoURL: url, source: source, title: title,
-                               shape: CardShape(mediaURL: url), insta: insta))
+        draft = .link(Resolved(videoURL: url, source: source, title: title, insta: insta))
         isResolving = false
         log.info("resolve exit: resolved, title=\(title ?? "nil", privacy: .public)")
     }
@@ -218,18 +213,11 @@ final class ComposeModel {
 
     /// Stage a photo the author picked. Replaces whatever was staged — picking a
     /// photo after pasting a link swaps the draft rather than stacking on it.
-    func stagePhoto(jpeg: Data, previewURL: URL, shape: CardShape = .square) {
+    func stagePhoto(jpeg: Data, previewURL: URL) {
         cancelResolving()          // a link still resolving would land on top of this
         linkText = ""
         errorText = nil
-        draft = .photo(Photo(jpeg: jpeg, shape: shape, previewURL: previewURL))
-    }
-
-    /// The framing the photo card uses. No-op unless a photo is staged.
-    func setPhotoShape(_ shape: CardShape) {
-        guard case .photo(var p) = draft else { return }
-        p.shape = shape
-        draft = .photo(p)
+        draft = .photo(Photo(jpeg: jpeg, previewURL: previewURL))
     }
 
     private func isRawFile(_ source: VideoSource) -> Bool {
@@ -265,20 +253,17 @@ final class ComposeModel {
                 try await db.createVideoPost(
                     issueId: issueId, circleId: circleId, authorId: author.id,
                     videoURL: resolved.videoURL, caption: note,
-                    captionStyle: captionStyle, cardShape: resolved.shape,
                     insta: resolved.insta, posterFocus: posterFocus)
             case .photo(let photo):
                 try await db.createPhotoPost(
                     issueId: issueId, circleId: circleId, authorId: author.id,
-                    jpeg: photo.jpeg, caption: note,
-                    captionStyle: captionStyle, cardShape: photo.shape)
+                    jpeg: photo.jpeg, caption: note)
             case .web(let link):
                 // The metadata scraped at paste time, not a fresh fetch: the
                 // author approved a specific preview and that's what ships.
                 try await db.createLinkPost(
                     issueId: issueId, circleId: circleId, authorId: author.id,
-                    url: link.url, meta: link.meta, caption: note,
-                    captionStyle: captionStyle)
+                    url: link.url, meta: link.meta, caption: note)
             }
             phase = .posted
         } catch {
@@ -293,10 +278,16 @@ extension ComposeModel {
     /// Jump straight to the compose step for canvas previews — no network.
     /// Lives here, not beside the preview: `resolved` and `phase` are
     /// `private(set)`, which only this file can reach.
-    func previewResolved(url: String, title: String?) {
+    func previewResolved(url: String, title: String?, insta: InstagramEmbed.Meta? = nil) {
         guard let u = URL(string: url), let source = VideoSource(u) else { return }
-        draft = .link(Resolved(videoURL: u, source: source, title: title,
-                               shape: CardShape(mediaURL: u)))
+        draft = .link(Resolved(videoURL: u, source: source, title: title, insta: insta))
+    }
+
+    /// Stage a plain web link without scraping it — `meta` is what the scrape
+    /// would have found, nil included.
+    func previewWebLink(_ url: String, meta: OpenGraph.Meta?) {
+        guard let u = URL(string: url) else { return }
+        draft = .web(WebLink(url: u, meta: meta))
     }
 
     func previewMarkPosted() { phase = .posted }

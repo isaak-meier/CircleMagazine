@@ -12,19 +12,14 @@ import SwiftUI
 // Tune to taste — smaller height (bigger number) makes the reel card shorter.
 private let instaReelAspect: CGFloat = 1.0
 
-// Video card: media sized to the source's own shape, author chip top-left,
-// title treatment driven by CaptionStyle.
+// Video card: media sized to the source's own shape, with the newsprint plate
+// underneath — red rule, mono kicker, serif title, byline.
 // Rendered only via CardView — Compose previews through CardView too.
 struct VideoCard: View {
     let source: VideoSource
-    var cardShape: CardShape = .tall
     let author: User?
     let caption: String?
     let title: String?
-    var captionStyle: CaptionStyle = .paperPlate
-    /// 1a's Comment button opens the comments sheet (wired by CardView). Nil in
-    /// previews, where the button is inert.
-    var onComment: (() -> Void)? = nil
     /// True when this is the card the feed is snapped to — the YouTube embed
     /// autoplays while active and pauses when scrolled away.
     var isActive: Bool = false
@@ -42,72 +37,32 @@ struct VideoCard: View {
     /// switches the card into edit mode (drag to reposition, no tap-out).
     var onInstaFocusChange: ((Double) -> Void)? = nil
 
-    // The line the plate/overlay sets in serif. Falls back to the note when a
-    // video has no fetched title; nil ⇒ no plate at all (just the media).
+    // The line the plate sets in serif: the publisher's own title, and only
+    // that. It used to fall back to the caption, which meant an Instagram card
+    // — nothing ever fetches a title for one — printed the author's note twice,
+    // once as the headline and again under their name. A card with no title
+    // just doesn't have one; the plate shrinks to the chip.
     private var displayTitle: String? {
-        let t = title ?? caption
-        return (t?.isEmpty ?? true) ? nil : t
+        (title?.isEmpty ?? true) ? nil : title
     }
 
+    // Fixed-height media on top, the newsprint plate underneath. The plate
+    // carries the byline, so it renders even with no title.
     var body: some View {
-        Group {
-            switch captionStyle {
-            case .immersive: immersiveCard
-            default:         platedCard   // paperPlate / inkBand / newsprintKicker
-            }
+        VStack(spacing: 0) {
+            mediaRegion
+            if displayTitle != nil || author != nil { newsprintPlate }
         }
         // Fill the card; the media stretches to take the space above the plate.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    // MARK: Layouts
+    // MARK: Media region
 
-    // 1a / 1c / 1d — fixed-height media on top, a caption plate underneath.
-    // The plate carries the author chip, so it renders even with no title.
-    private var platedCard: some View {
-        VStack(spacing: 0) {
-            mediaRegion(scrim: Color.clear)
-            if displayTitle != nil || author != nil { plate }
-        }
-    }
-
-    // 1b — full-bleed media with the title floating over the bottom. No plate,
-    // so the author chip stays overlaid on the media here.
-    private var immersiveCard: some View {
-        mediaRegion(scrim: immersiveScrim) {
-            if let author {
-                authorChip(author, tint: .white)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .allowsHitTesting(false)
-            }
-            if let displayTitle {
-                VStack(alignment: .leading, spacing: 9) {
-                    kicker(markSize: 18, color: .white.opacity(0.85))
-                    Text(displayTitle)
-                        .font(.system(size: 20, weight: .bold, design: .serif))
-                        .foregroundStyle(.white)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 18).padding(.bottom, 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                .allowsHitTesting(false)
-            }
-        }
-    }
-
-    // MARK: Media region (shared)
-
-    private func mediaRegion(scrim: some View,
-                             @ViewBuilder overlay: () -> some View = { EmptyView() }) -> some View {
-        ZStack {
-            media
-            scrim.allowsHitTesting(false)
-
-            overlay()
-        }
-        .modifier(ShapeFrame(contentAspect: contentAspect))
-        .clipped()
+    private var mediaRegion: some View {
+        media
+            .modifier(ShapeFrame(contentAspect: contentAspect))
+            .clipped()
     }
 
     // Each medium is shown at the shape it was shot in: a YouTube video is 16:9
@@ -117,13 +72,16 @@ struct VideoCard: View {
     private var contentAspect: CGFloat? {
         switch source {
         case .youtube: 16.0 / 9.0
-        case .insta:   cardShape == .tall ? instaReelAspect : nil
+        // Both Instagram kinds land square: a post is 1:1 already, a reel is a
+        // 9:16 poster cropped to the same window. No reason to tell them apart.
+        case .insta:   instaReelAspect
         case .rawFile: nil
         }
     }
 
     // Sizes the media to `contentAspect` so the card can hug it. Nil ⇒ fill the
-    // card (a wide/square reel, or raw file playback).
+    // card, which only raw-file playback does — and it has no height of its own,
+    // so it only works inside a card that was given one.
     private struct ShapeFrame: ViewModifier {
         var contentAspect: CGFloat? = nil
         func body(content: Content) -> some View {
@@ -146,145 +104,61 @@ struct VideoCard: View {
         }
     }
 
-    // Bottom-heavy scrim for the full-bleed title (1b).
-    private var immersiveScrim: some View {
-        LinearGradient(stops: [
-            .init(color: .black.opacity(0.5),  location: 0.0),
-            .init(color: .clear,               location: 0.20),
-            .init(color: .clear,               location: 0.52),
-            .init(color: .black.opacity(0.3),  location: 0.72),
-            .init(color: .black.opacity(0.85), location: 1.0),
-        ], startPoint: .top, endPoint: .bottom)
-    }
+    // MARK: The plate
 
-    // MARK: Plates
-
-    @ViewBuilder
-    private var plate: some View {
-        switch captionStyle {
-        case .inkBand:         inkBandPlate
-        case .newsprintKicker: newsprintPlate
-        default:               paperPlate
-        }
-    }
-
-    // 1a — the YouTube embed carries its own title/channel, so below it we show
-    // the poster's byline + note (red rule) and the Comment / React / Re-circle
-    // actions.
-    private var paperPlate: some View {
-        VStack(spacing: 0) {
-            if let author {
-                HStack(spacing: 14) {
-                    RoundedRectangle(cornerRadius: 2).fill(Color(hex: 0xFF0000)).frame(width: 3)
-                    HStack(spacing: 9) {
-                        Avatar(user: author)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(author.username)
-                                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Style.ink)
-                            if let caption {
-                                // The note is the post's first comment, so tapping
-                                // it opens the thread (same as the Comment button).
-                                Text(caption).font(.system(size: 10.5))
-                                    .foregroundStyle(Color(hex: 0x9A958E)).lineLimit(1)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { onComment?() }
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        if let trailingAccessory { trailingAccessory }
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 16).padding(.top, 18)
-            }
-        }
-        // The actions used to sit here, which is why only YouTube cards had any.
-        // They're in CardFooter now, rendered once for every card type.
-        .padding(.bottom, 18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Style.paper)
-    }
-
-    // 1c — navy plate, mono kicker, cream serif title, author below.
-    private var inkBandPlate: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            kicker(markSize: 17, color: Color(hex: 0x9A9AC0))
-            plateTitle(color: Style.paper)
-            if let author { authorChip(author, tint: .white).padding(.top, 4) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 16)
-        .background(Style.edition)
-    }
-
-    // 1d — cream plate, red rule, "VIDEO · author" mono kicker over serif title.
+    // Cream plate, red rule, "VIDEO · author" mono kicker over a serif title,
+    // byline underneath. The other three treatments (paper plate, immersive,
+    // ink band) were cut — this is the house style now.
     private var newsprintPlate: some View {
         HStack(spacing: 13) {
             RoundedRectangle(cornerRadius: 2).fill(Color(hex: 0xFF0000)).frame(width: 3)
             VStack(alignment: .leading, spacing: 7) {
-                monoKicker("Video · \(author?.username ?? "Circle")", color: Style.meta)
-                plateTitle(color: Style.ink)
-                if let author { authorChip(author, tint: Style.ink).padding(.top, 3) }
+                if let displayTitle { plateTitle(displayTitle) }
+                // The 3pt is breathing room under a title — with no title above
+                // it, the chip is the plate's first row and doesn't want it.
+                if let author {
+                    authorChip(author).padding(.top, displayTitle == nil ? 0 : 3)
+                }
             }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 16)
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 0)
         .background(Style.paper)
+        // The red rule is a Shape with only its width pinned, so it's infinitely
+        // flexible vertically — that alone makes the plate compete with the
+        // media for the card's leftover height and stretch. Pin the plate to the
+        // height of its own text; the rule then fills that instead of setting it.
+        .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func plateTitle(color: Color) -> some View {
-        Text(displayTitle ?? "")
+    private func plateTitle(_ text: String) -> some View {
+        Text(text)
             .font(.system(size: 18, weight: .bold, design: .serif))
-            .foregroundStyle(color)
+            .foregroundStyle(Style.ink)
             .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 3)
     }
 
-    // MARK: Bits
-
-    // Author identity: avatar + name + caption subtitle. Tint is .white over
-    // media / the navy plate, Style.ink on the cream plates.
-    private func authorChip(_ author: User, tint: Color) -> some View {
+    // Author identity: avatar + name + caption subtitle.
+    private func authorChip(_ author: User) -> some View {
         HStack(spacing: 9) {
-            Avatar(user: author, ring: tint.opacity(0.45))
+            Avatar(user: author, ring: Style.ink.opacity(0.45))
             VStack(alignment: .leading, spacing: 1) {
-                Text(author.username).font(Style.byline).foregroundStyle(tint)
+                Text(author.username).font(Style.byline).foregroundStyle(Style.ink)
                 if let caption {
                     Text(caption)
-                        .font(.system(size: 10.5)).foregroundStyle(tint.opacity(0.82))
+                        .font(.system(size: 10.5)).foregroundStyle(Style.ink.opacity(0.82))
                         .lineLimit(1)
                 }
             }
         }
     }
 
-    // A "▶ WATCH" mono line, used by 1b/1c. ponytail: no duration — oEmbed
-    // doesn't return it, so we show the verb without a runtime.
-    private func kicker(markSize: CGFloat, color: Color) -> some View {
-        HStack(spacing: 8) {
-            sourceMark(size: markSize)
-            Text("Watch".uppercased())
-                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                .tracking(1.6).foregroundStyle(color)
-        }
-    }
-
-    private func monoKicker(_ text: String, color: Color) -> some View {
+    private func monoKicker(_ text: String) -> some View {
         Text(text.uppercased())
             .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-            .tracking(1.6).foregroundStyle(color)
-    }
-
-    // Red YouTube glyph for YouTube posts; nothing for other sources.
-    @ViewBuilder
-    private func sourceMark(size: CGFloat) -> some View {
-        if case .youtube = source {
-            RoundedRectangle(cornerRadius: size * 0.18)
-                .fill(Color(hex: 0xFF0000))
-                .frame(width: size, height: size * 0.7)
-                .overlay(Image(systemName: "play.fill")
-                    .font(.system(size: size * 0.34)).foregroundStyle(.white))
-        }
+            .tracking(1.6).foregroundStyle(Style.meta)
     }
 }
 

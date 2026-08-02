@@ -261,8 +261,7 @@ struct Page: Codable {
     let submittedBy: UUID?
     let title: String?        // optional editorial title, shown over the media
     let caption: String?      // optional, set by the author on submit
-    var captionStyle: CaptionStyle? = nil  // how the title bar is treated; nil ⇒ default
-    var cardShape: CardShape? = nil        // media aspect ratio; nil ⇒ full-bleed (tall)
+    var captionStyle: CaptionStyle? = nil  // always newsprint; kept so the column round-trips
     let createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
@@ -272,7 +271,6 @@ struct Page: Codable {
         case title
         case caption
         case captionStyle = "caption_style"
-        case cardShape = "card_shape"
         case createdAt = "created_at"
     }
 }
