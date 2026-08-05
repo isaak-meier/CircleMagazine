@@ -10,7 +10,7 @@ The database is hosted on Supabase, which has a beautiful swift framework that m
 `IssueStore` and `AccountManager` wrap the database code, and reduce it to a few possible view states- for example, `IssueStore` has an @Observable enum with the cases `.loading, .loaded, .failedToLoad`. 
 With associated values, we can include the Magazine data in the .loaded case like so- `.loaded(let magazine)`. `IssueStore` caches one of these per circle, keyed by circle id, so re-entering a circle is instant.
 
-I really like this pattern because it reduces the complexity of the server to only a couple possible states for the view. 
+I love this pattern because it reduces the complexity of the server to only a couple possible states for the view. 
 
 From here, we use ViewModels to transform the data and inform the view. So the overall pattern is MVVM (my preferred iOS development pattern). Views never touch a service directly — the `ViewModelFactory` is the composition root: it owns the shared services (`IssueStore`, `DatabaseService`) and assembles a screen's ViewModel graph on demand, handing the view a ready-made ViewModel.
 
